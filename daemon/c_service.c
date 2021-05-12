@@ -377,7 +377,11 @@ c_service_start_pre_clone(void *servicep)
 	c_service_t *service = servicep;
 	ASSERT(service);
 
-	service->sock = sock_unix_create(SOCK_STREAM);
+	if (container_get_type(service->container) == CONTAINER_TYPE_KVM) {
+		service->sock = sock_vsock_create(SOCK_STREAM);
+	} else {
+		service->sock = sock_unix_create(SOCK_STREAM);
+	}
 
 	if (service->sock < 0)
 		return COMPARTMENT_ERROR_SERVICE;
@@ -397,8 +401,15 @@ c_service_start_child(void *servicep)
 	c_service_t *service = servicep;
 	ASSERT(service);
 
-	if (sock_unix_bind(service->sock, C_SERVICE_SOCKET) < 0)
-		return -COMPARTMENT_ERROR_SERVICE;
+	if (container_get_type(service->container) == CONTAINER_TYPE_KVM) {
+		int cid = VMADDR_CID_HOST;
+		int port = 9999;
+		if (sock_vsock_bind(service->sock, cid, port) < 0)
+			return -COMPARTMENT_ERROR_SERVICE;
+	} else {
+		if (sock_unix_bind(service->sock, C_SERVICE_SOCKET) < 0)
+			return -COMPARTMENT_ERROR_SERVICE;
+	}
 
 	return 0;
 }

@@ -156,6 +156,7 @@ SRC_CMODULES += \
 	c_audit.c \
 	c_cap.c \
 	c_hotplug.c \
+	c_kvm.c \
 	c_seccomp.c
 
 ifeq ($(AUTOMOUNT),y)

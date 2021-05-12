@@ -497,4 +497,7 @@ compartment_get_allow_system_time(compartment_t *compartment);
 void
 compartment_wait_for_child(compartment_t *compartment, char *name, pid_t pid);
 
+const char *
+compartment_get_debug_log_dir(const compartment_t *compartment);
+
 #endif /* COMPARTMENT_H */

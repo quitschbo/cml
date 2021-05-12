@@ -967,7 +967,8 @@ compartment_start_child(void *data)
 			goto error;
 		}
 		if (pid == 0) { // child
-			char *const argv[] = { "/usr/bin/lkvm", "run", "-d", kvm_root, NULL };
+			char *const argv[] = { "/usr/bin/lkvm", "run", "-d", kvm_root,
+					       "--vsock",	"3",   NULL };
 			execv(argv[0], argv);
 			WARN("Could not run exec for kvm compartment %s",
 			     uuid_string(compartment->uuid));
@@ -1873,4 +1874,11 @@ compartment_wait_for_child(compartment_t *compartment, char *name, pid_t pid)
 		compartment_helper_child_t *child = l->data;
 		DEBUG("\t Helper child '%s' (%d)", child->name, child->pid);
 	}
+}
+
+const char *
+compartment_get_debug_log_dir(const compartment_t *compartment)
+{
+	ASSERT(compartment);
+	return compartment->debug_log_dir;
 }

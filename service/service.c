@@ -338,12 +338,27 @@ static int
 open_service_socket()
 {
 	const char *socket_file = SERVICE_SOCKET;
+	bool vsock = false;
 	if (!file_exists(socket_file)) {
-		ERROR("Could not find socket file %s.", socket_file);
-		return -1;
+		WARN("Could not find socket file %s. Assuming this uses vsocket", socket_file);
+		vsock = true;
 	}
 
-	int sock = sock_unix_create_and_connect(SOCK_STREAM, socket_file);
+	int cid = VMADDR_CID_HOST;
+	int port = 9999;
+	int sock = 0;
+	if (vsock) {
+		sock = sock_vsock_create_and_connect(SOCK_STREAM, cid, port);
+		if (sock < 0) {
+			FATAL("Could not connect to service on virtio socket with cid: %d, port %d.",
+			      cid, port);
+		}
+	} else {
+		sock = sock_unix_create_and_connect(SOCK_STREAM, socket_file);
+		if (sock < 0) {
+			FATAL("Could not connect to service on socket file %s.", socket_file);
+		}
+	}
 	if (sock < 0) {
 		ERROR("Could not connect to service on socket file %s.", socket_file);
 		return -1;
