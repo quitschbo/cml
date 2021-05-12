@@ -32,6 +32,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <linux/vm_sockets.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <stdint.h>
@@ -225,6 +226,61 @@ sock_inet_create_and_connect(int type, const char *node, const char *service);
  */
 int
 sock_unix_get_peer_uid(int sock, uint32_t *peer_uid);
+/**
+ * Creates a new VSOCK socket of the given type.
+ *
+ * @param type  type of the socket (e.g. SOCK_STREAM, SOCK_SEQPACKET, ...);
+ *              (bitwise OR with SOCK_NONBLOCK saves extra call to fcntl)
+ * @return  the new UNIX socket file descriptor, or -1 on error
+ */
+int
+sock_vsock_create(int type);
+
+/**
+ * Binds the given VSOCK socket to the specified path.
+ *
+ * @param sock  the UNIX socket file descriptor to bind
+ * @param cid   context id of the socket
+ * @param port  port of the socket
+ * @return  0 on success, -1 on error
+ */
+int
+sock_vsock_bind(int sock, int cid, int port);
+
+/**
+ * Connects the given VSOCK socket to the specified path.
+ *
+ * @param sock  the UNIX socket file descriptor to bind
+ * @param cid   context id of the socket
+ * @param port  port of the socket
+ * @return      0 on success, -1 on error
+ */
+int
+sock_vsock_connect(int sock, int cid, int port);
+
+/**
+ * Creates a new VSOCK socket and binds it to the specified path.
+ *
+ * @param type  type of the socket (e.g. SOCK_STREAM, SOCK_SEQPACKET, ...);
+ *              (bitwise OR with SOCK_NONBLOCK saves extra call to fcntl)
+ * @param cid   context id of the socket
+ * @param port  port of the socket
+ * @return  the new and bound UNIX socket file descriptor, or -1 on error
+ */
+int
+sock_vsock_create_and_bind(int type, int cid, int port);
+
+/**
+ * Creates a new VSOCK socket and connects it to the specified socket file.
+ *
+ * @param type  type of the socket (e.g. SOCK_STREAM, SOCK_SEQPACKET, ...)
+ *              (bitwise OR with SOCK_NONBLOCK saves extra call to fcntl)
+ * @param cid   context id of the socket
+ * @param port  port of the socket
+ * @return      the new and connected UNIX socket file descriptor, or -1 on error
+ */
+int
+sock_vsock_create_and_connect(int type, int cid, int port);
 
 /**
  * Get pid of the foreign peer

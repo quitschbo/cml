@@ -46,6 +46,11 @@
 	addr.sin_addr.s_addr = inet_addr(server_ip);                                               \
 	addr.sin_port = htons(server_port)
 
+#define MAKE_SOCKADDR_VI(addr, cid, port)                                                          \
+	struct sockaddr_vm addr = { .svm_family = AF_VSOCK };                                      \
+	addr.svm_cid = cid;                                                                        \
+	addr.svm_port = port;
+
 int
 sock_unix_bind(int sock, const char *path)
 {
@@ -142,6 +147,61 @@ sock_unix_close_and_unlink(int sock, const char *path)
 		WARN_ERRNO("Failed to close on UNIX socket %d.", sock);
 	}
 	return -1;
+}
+
+int
+sock_vsock_bind(int sock, int cid, int port)
+{
+	MAKE_SOCKADDR_VI(addr, cid, port);
+	int res = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+	if (-1 == res)
+		WARN_ERRNO("Failed to bind VIRTIO socket at %d:%d.", cid, port);
+	return res;
+}
+
+int
+sock_vsock_connect(int sock, int cid, int port)
+{
+	MAKE_SOCKADDR_VI(addr, cid, port);
+	int res = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+	if (-1 == res)
+		WARN_ERRNO("Failed to connect VIRTIO socket at %d:%d.", cid, port);
+	return res;
+}
+
+int
+sock_vsock_create(int type)
+{
+	int sock = socket(AF_VSOCK, type, 0);
+	if (-1 == sock)
+		WARN_ERRNO("Failed to create VIRTIO socket.");
+	return sock;
+}
+
+int
+sock_vsock_create_and_bind(int type, int cid, int port)
+{
+	int sock = sock_vsock_create(type);
+	if (-1 != sock) {
+		if (-1 == sock_vsock_bind(sock, cid, port)) {
+			close(sock);
+			sock = -1;
+		}
+	}
+	return sock;
+}
+
+int
+sock_vsock_create_and_connect(int type, int cid, int port)
+{
+	int sock = sock_vsock_create(type);
+	if (-1 != sock) {
+		if (-1 == sock_vsock_connect(sock, cid, port)) {
+			close(sock);
+			sock = -1;
+		}
+	}
+	return sock;
 }
 
 int
