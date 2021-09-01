@@ -168,14 +168,15 @@ enum container_error {
  * @return The new container instance.
  */
 container_t *
-container_new_internal(const uuid_t *uuid, const char *name, container_type_t type, bool ns_usr,
-		       bool ns_net, const guestos_t *os, const char *config_filename,
-		       const char *images_folder, mount_t *mnt, unsigned int ram_limit,
-		       const char *cpus_allowed, uint32_t color, bool allow_autostart,
-		       const char *dns_server, list_t *net_ifaces, char **allowed_devices,
-		       char **assigned_devices, list_t *vnet_cfg_list, list_t *usbdev_list,
-		       char **init_env, size_t init_env_len, list_t *fifo_list,
-		       container_token_type_t ttype, bool usb_pin_entry);
+container_new_internal(const uuid_t *parent_uuid, const char *parent_netns, const uuid_t *uuid,
+		       const char *name, container_type_t type, bool ns_usr, bool ns_net,
+		       const guestos_t *os, const char *config_filename, const char *images_dir,
+		       mount_t *mnt, unsigned int ram_limit, const char *cpus_allowed,
+		       uint32_t color, bool allow_autostart, const char *dns_server,
+		       list_t *net_ifaces, char **allowed_devices, char **assigned_devices,
+		       list_t *vnet_cfg_list, list_t *usbdev_list, char **init_env,
+		       size_t init_env_len, list_t *fifo_list, container_token_type_t ttype,
+		       bool usb_pin_entry);
 
 /**
  * Creates a new container container object. There are three different cases
@@ -233,6 +234,12 @@ container_get_name(const container_t *container);
  */
 const uuid_t *
 container_get_uuid(const container_t *container);
+
+/**
+ * Returns the uuid of the container's parent.
+ */
+const uuid_t *
+container_get_parent_uuid(const container_t *container);
 
 /**
  * Return the partition table of the container.

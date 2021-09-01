@@ -232,4 +232,10 @@ container_config_get_token_type(const container_config_t *config);
 bool
 container_config_get_usb_pin_entry(const container_config_t *config);
 
+const char *
+container_config_get_parent_uuid(const container_config_t *config);
+
+const char *
+container_config_get_parent_netns(const container_config_t *config);
+
 #endif /* C_CONFIG_H */

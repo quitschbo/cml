@@ -103,6 +103,8 @@
 struct container {
 	container_state_t state;
 	container_state_t prev_state;
+	uuid_t *parent_uuid; /* uuid of parent container containing net namespace to be joined */
+	char *parent_netns;  /* netns name inside parent network namespace */
 	uuid_t *uuid;
 	char *name;
 	container_type_t type;
@@ -210,20 +212,23 @@ container_free_key(container_t *container)
 }
 
 container_t *
-container_new_internal(const uuid_t *uuid, const char *name, container_type_t type, bool ns_usr,
-		       bool ns_net, const guestos_t *os, const char *config_filename,
-		       const char *images_dir, mount_t *mnt, unsigned int ram_limit,
-		       const char *cpus_allowed, uint32_t color, bool allow_autostart,
-		       const char *dns_server, list_t *net_ifaces, char **allowed_devices,
-		       char **assigned_devices, list_t *vnet_cfg_list, list_t *usbdev_list,
-		       char **init_env, size_t init_env_len, list_t *fifo_list,
-		       container_token_type_t ttype, bool usb_pin_entry)
+container_new_internal(const uuid_t *parent_uuid, const char *parent_netns, const uuid_t *uuid,
+		       const char *name, container_type_t type, bool ns_usr, bool ns_net,
+		       const guestos_t *os, const char *config_filename, const char *images_dir,
+		       mount_t *mnt, unsigned int ram_limit, const char *cpus_allowed,
+		       uint32_t color, bool allow_autostart, const char *dns_server,
+		       list_t *net_ifaces, char **allowed_devices, char **assigned_devices,
+		       list_t *vnet_cfg_list, list_t *usbdev_list, char **init_env,
+		       size_t init_env_len, list_t *fifo_list, container_token_type_t ttype,
+		       bool usb_pin_entry)
 {
 	container_t *container = mem_new0(container_t, 1);
 
 	container->state = CONTAINER_STATE_STOPPED;
 	container->prev_state = CONTAINER_STATE_STOPPED;
 
+	container->parent_uuid = parent_uuid ? uuid_new(uuid_string(parent_uuid)) : NULL;
+	container->parent_netns = parent_netns ? mem_strdup(parent_netns) : NULL;
 	container->uuid = uuid_new(uuid_string(uuid));
 	container->name = mem_strdup(name);
 	container->type = type;
@@ -435,6 +440,8 @@ container_new(const char *store_path, const uuid_t *existing_uuid, const uint8_t
 	unsigned int ram_limit;
 	const char *cpus_allowed;
 	uint32_t color;
+	uuid_t *parent_uuid;
+	const char *parent_netns;
 	uuid_t *uuid;
 	uint64_t current_guestos_version;
 	uint64_t new_guestos_version;
@@ -469,6 +476,11 @@ container_new(const char *store_path, const uuid_t *existing_uuid, const uint8_t
 		return NULL;
 	}
 
+	parent_uuid = container_config_get_parent_uuid(conf) ?
+			      uuid_new(container_config_get_parent_uuid(conf)) :
+			      NULL;
+
+	parent_netns = container_config_get_parent_netns(conf);
 	name = container_config_get_name(conf);
 
 	const char *os_name = container_config_get_guestos(conf);
@@ -555,16 +567,16 @@ container_new(const char *store_path, const uuid_t *existing_uuid, const uint8_t
 
 	bool usb_pin_entry = container_config_get_usb_pin_entry(conf);
 
-	container_t *c =
-		container_new_internal(uuid, name, type, ns_usr, ns_net, os, config_filename,
-				       images_dir, mnt, ram_limit, cpus_allowed, color,
-				       allow_autostart, dns_server, net_ifaces, allowed_devices,
-				       assigned_devices, vnet_cfg_list, usbdev_list, init_env,
-				       init_env_len, fifo_list, ttype, usb_pin_entry);
+	container_t *c = container_new_internal(
+		parent_uuid, parent_netns, uuid, name, type, ns_usr, ns_net, os, config_filename,
+		images_dir, mnt, ram_limit, cpus_allowed, color, allow_autostart, dns_server,
+		net_ifaces, allowed_devices, assigned_devices, vnet_cfg_list, usbdev_list, init_env,
+		init_env_len, fifo_list, ttype, usb_pin_entry);
 	if (c)
 		container_config_write(conf);
 
 	uuid_free(uuid);
+	uuid_free(parent_uuid);
 	mem_free0(images_dir);
 	mem_free0(config_filename);
 
@@ -592,6 +604,8 @@ container_free(container_t *container)
 
 	container_free_key(container);
 
+	uuid_free(container->parent_uuid);
+	mem_free0(container->parent_netns);
 	uuid_free(container->uuid);
 	mem_free0(container->name);
 
@@ -671,6 +685,13 @@ container_get_uuid(const container_t *container)
 {
 	ASSERT(container);
 	return container->uuid;
+}
+
+const uuid_t *
+container_get_parent_uuid(const container_t *container)
+{
+	ASSERT(container);
+	return container->parent_uuid;
 }
 
 const mount_t *
@@ -1320,6 +1341,8 @@ container_start_child_early(void *data)
 	int ret = 0;
 
 	container_t *container = data;
+	container_t *parent =
+		container->parent_uuid ? cmld_container_get_by_uuid(container->parent_uuid) : NULL;
 
 	close(container->sync_sock_parent);
 
@@ -1361,8 +1384,36 @@ container_start_child_early(void *data)
 	} else {
 		if (container->ns_usr)
 			clone_flags |= CLONE_NEWUSER;
-		if (container->ns_net)
+		if (container->ns_net && !parent)
 			clone_flags |= CLONE_NEWNET;
+	}
+	if (parent) {
+		int mntfd = ns_open_nsfd_by_pid(getpid(), "mnt");
+		if (mntfd < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+		/* join parents mountns to get access to filesystem where netns files are
+		 * located
+		 */
+		if (ns_join_by_pid(container_get_pid(parent), "mnt") < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+		/* join netns by path inside the parent container */
+		char *netns_path = mem_printf("/var/run/netns/%s", container->parent_netns);
+		if (ns_join_by_path(netns_path) < 0) {
+			ret = CONTAINER_ERROR_NET;
+			mem_free0(netns_path);
+			goto error;
+		}
+		mem_free0(netns_path);
+
+		/* rejoin cmld's mount ns to proceed with normal startup */
+		if (ns_join_by_nsfd(mntfd) < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
 	}
 
 	container->pid = clone(container_start_child, container_stack_high, clone_flags, container);
@@ -1653,10 +1704,19 @@ container_start(container_t *container) //, const char *key)
 {
 	ASSERT(container);
 
+	container_t *parent =
+		container->parent_uuid ? cmld_container_get_by_uuid(container->parent_uuid) : NULL;
+
 	if ((container_get_state(container) != CONTAINER_STATE_STOPPED) &&
 	    (container_get_state(container) != CONTAINER_STATE_REBOOTING)) {
 		ERROR("Container %s is not stopped and can therefore not be started",
 		      container_get_description(container));
+		return CONTAINER_ERROR;
+	}
+
+	if (parent && container_get_state(parent) != CONTAINER_STATE_RUNNING) {
+		ERROR("Parent %s for container %s is not running!",
+		      container_get_description(parent), container_get_description(container));
 		return CONTAINER_ERROR;
 	}
 

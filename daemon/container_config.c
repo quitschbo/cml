@@ -663,6 +663,22 @@ container_config_get_cpus_allowed(const container_config_t *config)
 	return config->cfg->assign_cpus;
 }
 
+const char *
+container_config_get_parent_uuid(const container_config_t *config)
+{
+	ASSERT(config);
+	ASSERT(config->cfg);
+	return config->cfg->parent_uuid;
+}
+
+const char *
+container_config_get_parent_netns(const container_config_t *config)
+{
+	ASSERT(config);
+	ASSERT(config->cfg);
+	return config->cfg->parent_netns;
+}
+
 // hardcode some restricted config otpions in CC Mode
 #ifdef CC_MODE
 uint32_t
