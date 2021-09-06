@@ -1351,6 +1351,45 @@ container_start_child_early(void *data)
 		goto error;
 	}
 
+	///////////////////////////////////////
+	// move this to c_net_start_child_early() ?
+	if (parent) {
+		int mntfd = ns_open_nsfd_by_pid(getpid(), "mnt");
+		if (mntfd < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+		/* join parents userns */
+		if (c_net_join_netns(parent->net) < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+		/* join parents mountns to get access to filesystem where netns files are
+		 * located
+		 */
+		if (ns_join_by_pid(container_get_pid(parent), "mnt") < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+		if (container->parent_netns) {
+			/* join netns by path inside the parent container */
+			char *netns_path = mem_printf("/var/run/netns/%s", container->parent_netns);
+			if (ns_join_by_path(netns_path) < 0) {
+				ret = CONTAINER_ERROR_NET;
+				mem_free0(netns_path);
+				goto error;
+			}
+			mem_free0(netns_path);
+		}
+
+		/* rejoin cmld's mount ns to proceed with normal startup */
+		if (ns_join_by_nsfd(mntfd) < 0) {
+			ret = CONTAINER_ERROR_NET;
+			goto error;
+		}
+	}
+	///////////////////////////////////////
+
 	if (c_vol_start_child_early(container->vol) < 0) {
 		ret = CONTAINER_ERROR_VOL;
 		goto error;
@@ -1381,39 +1420,17 @@ container_start_child_early(void *data)
 			ret = CONTAINER_ERROR_NET;
 			goto error;
 		}
+	} else if (parent) {
+		/* join parent's userns */
+		if (c_user_join_userns(parent->user) < 0) {
+			ret = CONTAINER_ERROR_USER;
+			goto error;
+		}
 	} else {
 		if (container->ns_usr)
 			clone_flags |= CLONE_NEWUSER;
-		if (container->ns_net && !parent)
+		if (container->ns_net)
 			clone_flags |= CLONE_NEWNET;
-	}
-	if (parent) {
-		int mntfd = ns_open_nsfd_by_pid(getpid(), "mnt");
-		if (mntfd < 0) {
-			ret = CONTAINER_ERROR_NET;
-			goto error;
-		}
-		/* join parents mountns to get access to filesystem where netns files are
-		 * located
-		 */
-		if (ns_join_by_pid(container_get_pid(parent), "mnt") < 0) {
-			ret = CONTAINER_ERROR_NET;
-			goto error;
-		}
-		/* join netns by path inside the parent container */
-		char *netns_path = mem_printf("/var/run/netns/%s", container->parent_netns);
-		if (ns_join_by_path(netns_path) < 0) {
-			ret = CONTAINER_ERROR_NET;
-			mem_free0(netns_path);
-			goto error;
-		}
-		mem_free0(netns_path);
-
-		/* rejoin cmld's mount ns to proceed with normal startup */
-		if (ns_join_by_nsfd(mntfd) < 0) {
-			ret = CONTAINER_ERROR_NET;
-			goto error;
-		}
 	}
 
 	container->pid = clone(container_start_child, container_stack_high, clone_flags, container);

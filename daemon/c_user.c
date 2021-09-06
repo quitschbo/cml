@@ -506,6 +506,13 @@ c_user_start_pre_clone(c_user_t *user)
 	    (container_get_prev_state(user->container) == CONTAINER_STATE_REBOOTING))
 		return 0;
 
+	if (container_get_parent_uuid(user->container)) {
+		container_t *parent =
+			cmld_container_get_by_uuid(container_get_parent_uuid(user->container));
+		user->uid_start = container_get_uid(parent);
+		return 0;
+	}
+
 	// reserve a new mapping
 	if (c_user_set_next_uid_range_start(user)) {
 		ERROR("Reserving uid range for userns");
@@ -521,6 +528,10 @@ c_user_start_post_clone(c_user_t *user)
 
 	/* Skip this, if the container doesn't have a user namespace */
 	if (!user->ns_usr)
+		return 0;
+
+	/* Skip this, if the container joins a parent namespace */
+	if (container_get_parent_uuid(user->container))
 		return 0;
 
 	/* skip on reboots of c0 */
