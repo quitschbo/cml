@@ -540,6 +540,34 @@ c_user_start_post_clone(c_user_t *user)
 	return c_user_setup_mapping(user);
 }
 
+typedef struct c_user_saved_shift {
+	char *saved;
+	char *target;
+} c_user_saved_shift_t;
+
+static c_user_saved_shift_t *
+c_user_saved_shift_new(const c_user_t *user, const char *target_root, const char *relative_mnt)
+{
+	c_user_saved_shift_t *saved_shift = mem_new0(c_user_saved_shift_t, 1);
+
+	saved_shift->target = mem_printf("%s/%s", target_root, relative_mnt);
+	saved_shift->saved =
+		mem_printf("%s/%s/%s", SHIFTFS_DIR,
+			   uuid_string(container_get_uuid(user->container)), relative_mnt);
+
+	return saved_shift;
+}
+
+static void
+c_user_saved_shift_free(c_user_saved_shift_t *saved_shift)
+{
+	if (saved_shift->target)
+		mem_free0(saved_shift->target);
+	if (saved_shift->saved)
+		mem_free0(saved_shift->saved);
+	mem_free0(saved_shift);
+}
+
 int
 c_user_shift_mounts(const c_user_t *user)
 {
@@ -549,25 +577,38 @@ c_user_shift_mounts(const c_user_t *user)
 	if (!user->ns_usr)
 		return 0;
 
-	char *target_dev, *saved_dev;
-	target_dev = saved_dev = NULL;
+	list_t *saved_shift_list = NULL;
 
 	TRACE("uid %d, euid %d", getuid(), geteuid());
 	for (list_t *l = user->marks; l; l = l->next) {
 		struct c_user_shift *shift_mark = l->data;
 
-		// save already mounted dev to remount after new rootfs mount
 		if (shift_mark->is_root) {
-			target_dev = mem_printf("%s/dev", shift_mark->target);
-			saved_dev = mem_printf("%s/%s/dev", SHIFTFS_DIR,
-					       uuid_string(container_get_uuid(user->container)));
-			if (dir_mkdir_p(saved_dev, 0777) < 0) {
-				ERROR_ERRNO("Could not mkdir temporary dev dir '%s'", saved_dev);
+			// save already mounted dev to remount after new rootfs mount
+			c_user_saved_shift_t *saved_shift_dev =
+				c_user_saved_shift_new(user, shift_mark->target, "dev");
+			saved_shift_list = list_append(saved_shift_list, saved_shift_dev);
+
+			if (container_get_parent_uuid(user->container)) {
+				// save already mounted sys to remount after new rootfs mount
+				c_user_saved_shift_t *saved_shift_sys =
+					c_user_saved_shift_new(user, shift_mark->target, "sys");
+				saved_shift_list = list_append(saved_shift_list, saved_shift_sys);
+			}
+		}
+
+		// save already mounted locations to remount after new rootfs mount
+		for (list_t *l = saved_shift_list; l; l = l->next) {
+			c_user_saved_shift_t *saved_shift = l->data;
+			if (dir_mkdir_p(saved_shift->saved, 0777) < 0) {
+				ERROR_ERRNO("Could not mkdir temporary dev dir '%s'",
+					    saved_shift->saved);
 				goto error;
 			}
-			if (mount(target_dev, saved_dev, NULL, MS_BIND, NULL) < 0) {
-				ERROR_ERRNO("Could not move dev '%s' to saved_dev '%s'", target_dev,
-					    saved_dev);
+			if (mount(saved_shift->target, saved_shift->saved, NULL, MS_BIND, NULL) <
+			    0) {
+				ERROR_ERRNO("Could not move dev '%s' to saved_dev '%s'",
+					    saved_shift->target, saved_shift->saved);
 			}
 		}
 
@@ -582,25 +623,35 @@ c_user_shift_mounts(const c_user_t *user)
 			     shift_mark->target);
 		}
 
-		// remount saved dev location at new shifted rootfs
 		if (shift_mark->is_root) {
-			if (mount(saved_dev, target_dev, NULL, MS_BIND, NULL) < 0) {
-				ERROR_ERRNO("Could mount dev '%s' in new root", target_dev);
+			for (list_t *l = saved_shift_list; l; l = l->next) {
+				c_user_saved_shift_t *saved_shift = l->data;
+				// remount saved dev location at new shifted rootfs
+				if (mount(saved_shift->saved, saved_shift->target, NULL, MS_BIND,
+					  NULL) < 0) {
+					ERROR_ERRNO("Could mount '%s' in new root",
+						    saved_shift->saved);
+				}
+				INFO("Successfully moved already mounted loctaion to shifted rootfs at '%s'",
+				     saved_shift->target);
 			}
-			INFO("Successfully moved dev to shifted rootfs at '%s'", target_dev);
 		}
 	}
 
-	if (target_dev)
-		mem_free0(target_dev);
-	if (saved_dev)
-		mem_free0(saved_dev);
+	for (list_t *l = saved_shift_list; l; l = l->next) {
+		c_user_saved_shift_t *saved_shift = l->data;
+		c_user_saved_shift_free(saved_shift);
+	}
+	list_delete(saved_shift_list);
+
 	return 0;
 error:
-	if (target_dev)
-		mem_free0(target_dev);
-	if (saved_dev)
-		mem_free0(saved_dev);
+	for (list_t *l = saved_shift_list; l; l = l->next) {
+		c_user_saved_shift_t *saved_shift = l->data;
+		c_user_saved_shift_free(saved_shift);
+	}
+	list_delete(saved_shift_list);
+
 	return -1;
 }
 

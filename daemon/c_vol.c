@@ -1196,6 +1196,30 @@ error:
 	return ret;
 }
 
+static int
+c_vol_mount_sys(const char *dir)
+{
+	int ret = -1;
+	char *sys_mnt = mem_printf("%s/%s", dir, "sys");
+
+	DEBUG("Mounting sys on %s", sys_mnt);
+
+	unsigned long sysopts = MS_RELATIME | MS_NOSUID;
+	if ((ret = mkdir(sys_mnt, 0755) < 0) && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", sys_mnt);
+		goto error;
+	}
+	if ((ret = mount("sysfs", sys_mnt, "sysfs", sysopts, NULL)) < 0) {
+		ERROR_ERRNO("Could not mount %s", sys_mnt);
+		goto error;
+	}
+
+	ret = 0;
+error:
+	mem_free(sys_mnt);
+	return ret;
+}
+
 /**
  * This Function verifes integrity of base images as part of
  * TSF.CML.SecureCompartmentInit.
@@ -1420,6 +1444,11 @@ c_vol_start_child_early(c_vol_t *vol)
 	DEBUG("Mounting /dev");
 	IF_TRUE_GOTO_ERROR(c_vol_mount_dev(vol) < 0, error);
 
+	if (container_get_parent_uuid(vol->container)) {
+		DEBUG("Mounting /sys early");
+		IF_TRUE_GOTO_ERROR(c_vol_mount_sys(vol->root) < 0, error);
+	}
+
 	/*
 	 * copy cml-service-container binary to target as defined in CSERVICE_TARGET
 	 * Remeber, This will only succeed if targetfs is writable
@@ -1501,6 +1530,7 @@ c_vol_start_pre_exec(c_vol_t *vol)
 	}
 
 	mem_free0(dev_mnt);
+
 	return 0;
 }
 static int
@@ -1522,22 +1552,16 @@ c_vol_mount_proc_and_sys(const c_vol_t *vol, const char *dir)
 		ERROR_ERRNO("Could not apply lxcfs overlay on mount %s", mnt_proc);
 		goto error;
 	}
+	mem_free0(mnt_proc);
+
+	if (container_get_parent_uuid(vol->container)) {
+		mem_free0(mnt_sys);
+		return 0;
+	}
 
 	DEBUG("Mounting sys on %s", mnt_sys);
-	unsigned long sysopts = MS_RELATIME | MS_NOSUID;
-	if (container_has_userns(vol->container) && !container_has_netns(vol->container)) {
-		sysopts |= MS_RDONLY;
-	}
-	if (mkdir(mnt_sys, 0755) < 0 && errno != EEXIST) {
-		ERROR_ERRNO("Could not mkdir %s", mnt_sys);
-		goto error;
-	}
-	if (mount("sysfs", mnt_sys, "sysfs", sysopts, NULL) < 0) {
-		ERROR_ERRNO("Could not mount %s", mnt_sys);
-		goto error;
-	}
+	IF_TRUE_GOTO_ERROR(c_vol_mount_sys(mnt_sys) < 0, error);
 
-	mem_free0(mnt_proc);
 	mem_free0(mnt_sys);
 	return 0;
 error:
