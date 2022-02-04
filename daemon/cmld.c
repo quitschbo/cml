@@ -382,6 +382,8 @@ cmld_container_new(const char *store_path, const uuid_t *existing_uuid, const ui
 	char **allowed_devices;
 	char **assigned_devices;
 	const char *init;
+	const container_t *parent;
+	const char *parent_netns;
 
 	if (!existing_uuid) {
 		uuid = uuid_new(NULL);
@@ -497,11 +499,18 @@ cmld_container_new(const char *store_path, const uuid_t *existing_uuid, const ui
 
 	bool usb_pin_entry = container_config_get_usb_pin_entry(conf);
 
-	container_t *c = container_new(uuid, name, type, ns_usr, ns_net, os, config_filename,
-				       images_dir, ram_limit, cpus_allowed, color, allow_autostart,
-				       dns_server, pnet_cfg_list, allowed_devices, assigned_devices,
-				       vnet_cfg_list, usbdev_list, init, init_argv, init_env,
-				       init_env_len, fifo_list, ttype, usb_pin_entry);
+	uuid_t *parent_uuid = container_config_get_parent_uuid(conf) ?
+				      uuid_new(container_config_get_parent_uuid(conf)) :
+				      NULL;
+	parent = parent_uuid ? cmld_container_get_by_uuid(parent_uuid) : NULL;
+	parent_netns = container_config_get_parent_netns(conf);
+
+	container_t *c =
+		container_new(parent, parent_netns, uuid, name, type, ns_usr, ns_net, os,
+			      config_filename, images_dir, ram_limit, cpus_allowed, color,
+			      allow_autostart, dns_server, pnet_cfg_list, allowed_devices,
+			      assigned_devices, vnet_cfg_list, usbdev_list, init, init_argv,
+			      init_env, init_env_len, fifo_list, ttype, usb_pin_entry);
 	if (c) {
 		// overwrite image sizes of mount table
 		container_config_fill_mount(conf, container_get_mnt(c));
@@ -1168,10 +1177,11 @@ cmld_init_c0(const char *path, const char *c0os)
 	char **init_argv = guestos_get_init_argv_new(c0_os);
 
 	container_t *new_c0 =
-		container_new(c0_uuid, "c0", COMPARTMENT_TYPE_CONTAINER, false, c0_ns_net, c0_os,
-			      NULL, c0_images_folder, c0_ram_limit, NULL, 0xffffff00, false,
-			      cmld_get_device_host_dns(), NULL, NULL, NULL, NULL, NULL, init,
-			      init_argv, NULL, 0, NULL, CONTAINER_TOKEN_TYPE_NONE, false);
+		container_new(NULL, NULL, c0_uuid, "c0", COMPARTMENT_TYPE_CONTAINER, false,
+			      c0_ns_net, c0_os, NULL, c0_images_folder, c0_ram_limit, NULL,
+			      0xffffff00, false, cmld_get_device_host_dns(), NULL, NULL, NULL, NULL,
+			      NULL, init, init_argv, NULL, 0, NULL, CONTAINER_TOKEN_TYPE_NONE,
+			      false);
 
 	/* store c0 as first element of the cmld_containers_list */
 	cmld_containers_list = list_prepend(cmld_containers_list, new_c0);

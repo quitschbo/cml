@@ -239,6 +239,9 @@ control_container_status_new(const container_t *container)
 	default:
 		c_status->trust_level = CONTAINER_TRUST__UNSIGNED;
 	}
+	const container_t *parent = container_get_parent(container);
+	const uuid_t *parent_uuid = parent ? container_get_uuid(parent) : NULL;
+	c_status->parent_uuid = parent_uuid ? mem_strdup(uuid_string(parent_uuid)) : NULL;
 
 	return c_status;
 }
@@ -256,6 +259,7 @@ control_container_status_free(ContainerStatus *c_status)
 	mem_free0(c_status->name);
 	mem_free0(c_status->uuid);
 	mem_free0(c_status->guestos);
+	mem_free0(c_status->parent_uuid);
 	mem_free0(c_status);
 }
 

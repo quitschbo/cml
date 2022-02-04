@@ -240,6 +240,24 @@ bool
 compartment_is_privileged(const compartment_t *compartment);
 
 /**
+ * Sets a parent compartment to this compartment.
+ */
+void
+compartment_set_parent(compartment_t *compartment, const compartment_t *parent);
+
+/**
+ * Returns the parent compartment of compartment.
+ */
+const compartment_t *
+compartment_get_parent(const compartment_t *compartment);
+
+/**
+ * Sets the netns name inside a parent compartment's network namespace
+ */
+void
+compartment_set_parent_netns(compartment_t *compartment, const char *parent_netns);
+
+/**
  * Suspends the compartment before moving it into background
  */
 int

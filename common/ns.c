@@ -340,21 +340,57 @@ ns_unbind(const char *ns_path)
 }
 
 int
-ns_join_by_path(const char *ns_path)
+ns_open_nsfd_by_path(const char *path)
 {
-	int fd = open(ns_path, O_RDONLY);
-	if (fd == -1) {
-		ERROR_ERRNO("Could not open namespace file %s", ns_path);
+	int nsfd = open(path, O_RDONLY);
+	if (nsfd == -1) {
+		ERROR_ERRNO("Could not open namespace file %s", path);
+		return -1;
+	}
+	return nsfd;
+}
+
+int
+ns_open_nsfd_by_pid(pid_t pid, const char *namespace)
+{
+	char *path = mem_printf("/proc/%d/ns/%s", pid, namespace);
+	int nsfd = ns_open_nsfd_by_path(path);
+
+	mem_free0(path);
+	return nsfd;
+}
+
+int
+ns_join_by_nsfd(int nsfd)
+{
+	IF_TRUE_RETVAL(nsfd < 0, nsfd);
+
+	if (setns(nsfd, 0) == -1) {
+		ERROR_ERRNO("Could not join namespace by fd %d!", nsfd);
+		close(nsfd);
 		return -1;
 	}
 
-	if (setns(fd, 0) == -1) {
-		ERROR_ERRNO("Could not join namespace by path %s!", ns_path);
-		close(fd);
-		return -1;
-	}
+	close(nsfd);
+	INFO("Sucessfully joined ns by fd: %d.", nsfd);
 
-	close(fd);
-	INFO("Sucessfully joined ns by path: '%s'.", ns_path);
 	return 0;
+}
+
+int
+ns_join_by_path(const char *path)
+{
+	int nsfd = ns_open_nsfd_by_path(path);
+	IF_TRUE_RETVAL(nsfd < 0, nsfd);
+
+	return ns_join_by_nsfd(nsfd);
+}
+
+int
+ns_join_by_pid(pid_t pid, const char *namespace)
+{
+	int nsfd = ns_open_nsfd_by_pid(pid, namespace);
+	IF_TRUE_RETVAL(nsfd < 0, nsfd);
+
+	return ns_join_by_nsfd(nsfd);
 }

@@ -98,4 +98,13 @@ ns_unbind(const char *ns_path);
 int
 ns_join_by_path(const char *ns_path);
 
+int
+ns_join_by_pid(pid_t pid, const char *namespace);
+
+int
+ns_open_nsfd_by_pid(pid_t pid, const char *namespace);
+
+int
+ns_join_by_nsfd(int nsfd);
+
 #endif //NS_H

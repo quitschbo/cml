@@ -98,6 +98,7 @@ message ContainerConfig {
 
 	optional string assign_cpus = 11; // cpus "m-n", e.g., "0-1"
 
+
 	// Flags indicating the allows for containers:
 	optional bool allow_autostart = 17 [default = false];
 	// TODO: add further features as necessary
@@ -128,6 +129,12 @@ message ContainerConfig {
 	required ContainerTokenType token_type = 30 [ default = SOFT ];
 
 	optional bool usb_pin_entry = 31 [ default = false ];
+
+	// uuid of a parent container which contains net namespaces
+	optional string parent_uuid = 40;
+	// name of netns in parent network namespace container
+	optional string parent_netns = 41;
+
 }
 
 /**
@@ -175,5 +182,6 @@ message ContainerStatus {
 	required uint64 created = 6;
 	required string guestos = 7;
 	required ContainerTrust trust_level = 8;
+	optional string parent_uuid = 9;
 	/* TBD more state values */
 }

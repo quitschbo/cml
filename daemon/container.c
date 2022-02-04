@@ -86,14 +86,14 @@ container_set_extension(void *extension_data, compartment_t *compartment)
 }
 
 container_t *
-container_new(const uuid_t *uuid, const char *name, compartment_type_t type, bool ns_usr,
-	      bool ns_net, const void *os, const char *config_filename, const char *images_dir,
-	      unsigned int ram_limit, const char *cpus_allowed, uint32_t color,
-	      bool allow_autostart, const char *dns_server, list_t *pnet_cfg_list,
-	      char **allowed_devices, char **assigned_devices, list_t *vnet_cfg_list,
-	      list_t *usbdev_list, const char *init, char **init_argv, char **init_env,
-	      size_t init_env_len, list_t *fifo_list, container_token_type_t ttype,
-	      bool usb_pin_entry)
+container_new(const container_t *parent, const char *parent_netns, const uuid_t *uuid,
+	      const char *name, compartment_type_t type, bool ns_usr, bool ns_net, const void *os,
+	      const char *config_filename, const char *images_dir, unsigned int ram_limit,
+	      const char *cpus_allowed, uint32_t color, bool allow_autostart,
+	      const char *dns_server, list_t *pnet_cfg_list, char **allowed_devices,
+	      char **assigned_devices, list_t *vnet_cfg_list, list_t *usbdev_list, const char *init,
+	      char **init_argv, char **init_env, size_t init_env_len, list_t *fifo_list,
+	      container_token_type_t ttype, bool usb_pin_entry)
 {
 	container_t *container = mem_new0(container_t, 1);
 
@@ -155,11 +155,15 @@ container_new(const uuid_t *uuid, const char *name, compartment_type_t type, boo
 		return NULL;
 	}
 
+	if (parent) {
+		compartment_set_parent(container->compartment, parent->compartment);
+		compartment_set_parent_netns(container->compartment, parent_netns);
+	}
+
 	// log output of compartment (only effective for COMPARTMENT_TYPE_KVM)
 	compartment_set_debug_log_dir(container->compartment, images_dir);
 
 	compartment_extension_free(extension);
-
 	return container;
 }
 
@@ -341,6 +345,31 @@ container_is_privileged(const container_t *container)
 {
 	ASSERT(container);
 	return compartment_is_privileged(container->compartment);
+}
+
+const container_t *
+container_get_parent(const container_t *container)
+{
+	ASSERT(container);
+
+	const compartment_t *parent = compartment_get_parent(container->compartment);
+	const container_t *parent_container =
+		parent ? compartment_get_extension_data(parent) : NULL;
+	return parent_container;
+}
+
+void
+container_set_parent(const container_t *container, const container_t *parent)
+{
+	ASSERT(container);
+	compartment_set_parent(container->compartment, parent->compartment);
+}
+
+void
+container_set_parent_netns(const container_t *container, const char *parent_netns)
+{
+	ASSERT(container);
+	compartment_set_parent_netns(container->compartment, parent_netns);
 }
 
 int

@@ -121,6 +121,9 @@ struct compartment {
 
 	// indicate if the compartment is synced with its config
 	bool is_synced;
+
+	const compartment_t *parent; /* parent container containing net namespace to be joined */
+	char *parent_netns;	     /* netns name inside parent network namespace */
 };
 
 struct compartment_callback {
@@ -352,6 +355,9 @@ compartment_free(compartment_t *compartment)
 	uuid_free(compartment->uuid);
 	mem_free0(compartment->name);
 
+	if (compartment->parent_netns)
+		mem_free0(compartment->parent_netns);
+
 	for (list_t *l = compartment->csock_list; l; l = l->next) {
 		compartment_sock_t *cs = l->data;
 		mem_free0(cs->path);
@@ -534,6 +540,29 @@ compartment_is_privileged(const compartment_t *compartment)
 {
 	ASSERT(compartment);
 	return compartment_uuid_is_c0id(compartment->uuid);
+}
+
+void
+compartment_set_parent(compartment_t *compartment, const compartment_t *parent)
+{
+	ASSERT(compartment);
+	compartment->parent = parent;
+}
+
+const compartment_t *
+compartment_get_parent(const compartment_t *compartment)
+{
+	ASSERT(compartment);
+	return compartment->parent;
+}
+
+void
+compartment_set_parent_netns(compartment_t *compartment, const char *parent_netns)
+{
+	ASSERT(compartment);
+	if (compartment->parent_netns)
+		mem_free0(compartment->parent_netns);
+	compartment->parent_netns = mem_strdup(parent_netns);
 }
 
 /**
@@ -911,9 +940,45 @@ compartment_start_child_early(void *data)
 	} else {
 		if (c_user && compartment->ns_usr)
 			clone_flags |= CLONE_NEWUSER;
-		if (c_net && compartment->ns_net)
+		if (c_net && compartment->ns_net && !compartment->parent)
 			clone_flags |= CLONE_NEWNET;
 	}
+
+	if (compartment->parent) {
+		compartment_module_instance_t *c_net =
+			compartment_module_get_mod_instance_by_name(compartment->parent, "c_net");
+
+		int mntfd = ns_open_nsfd_by_pid(getpid(), "mnt");
+		if (mntfd < 0) {
+			ret = COMPARTMENT_ERROR_NET;
+			goto error;
+		}
+		if (c_net && c_net->module && c_net->module->join_ns) {
+			IF_TRUE_GOTO((ret = c_net->module->join_ns(c_net->instance)) < 0, error);
+		}
+		/* join parents mountns to get access to filesystem where netns files are
+		 * located
+		 */
+		if (ns_join_by_pid(compartment_get_pid(compartment->parent), "mnt") < 0) {
+			ret = COMPARTMENT_ERROR_NET;
+			goto error;
+		}
+		/* join netns by path inside the parent container */
+		char *netns_path = mem_printf("/var/run/netns/%s", compartment->parent_netns);
+		if (ns_join_by_path(netns_path) < 0) {
+			ret = COMPARTMENT_ERROR_NET;
+			mem_free0(netns_path);
+			goto error;
+		}
+		mem_free0(netns_path);
+
+		/* rejoin cmld's mount ns to proceed with normal startup */
+		if (ns_join_by_nsfd(mntfd) < 0) {
+			ret = COMPARTMENT_ERROR_NET;
+			goto error;
+		}
+	}
+
 
 	compartment->pid =
 		clone(compartment_start_child, compartment_stack_high, clone_flags, compartment);
@@ -1174,6 +1239,14 @@ compartment_start(compartment_t *compartment)
 	if ((compartment_get_state(compartment) != COMPARTMENT_STATE_STOPPED) &&
 	    (compartment_get_state(compartment) != COMPARTMENT_STATE_REBOOTING)) {
 		ERROR("Container %s is not stopped and can therefore not be started",
+		      compartment_get_description(compartment));
+		return COMPARTMENT_ERROR;
+	}
+
+	const compartment_t *parent = compartment->parent;
+	if (parent && compartment_get_state(parent) != COMPARTMENT_STATE_RUNNING) {
+		ERROR("Parent %s for container %s is not running!",
+		      compartment_get_description(parent),
 		      compartment_get_description(compartment));
 		return COMPARTMENT_ERROR;
 	}
