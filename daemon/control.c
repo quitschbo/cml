@@ -837,7 +837,9 @@ control_check_command(control_t *control, const ControllerToDaemon *msg)
 	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__GET_CONTAINER_STATUS) ||
 	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_CMLD_HANDLES_PIN) ||
 	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_STOP) ||
-	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__PUSH_GUESTOS_CONFIG)) {
+	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__PUSH_GUESTOS_CONFIG) ||
+	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT) ||
+	    (msg->command == CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT_NETNS)) {
 		TRACE("Received command %d is valid in provisioned mode", msg->command);
 		return true;
 	}
@@ -1542,6 +1544,31 @@ control_handle_message(control_t *control, const ControllerToDaemon *msg, int fd
 			WARN("Could not send container cmld handles pin info");
 		}
 	} break;
+
+	case CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT:
+		if (msg->n_container_uuids < 2) {
+			control_send_message(CONTROL_RESPONSE_CMD_FAILED, fd);
+			return;
+		}
+		container = control_get_container_by_uuid_string(msg->container_uuids[0]);
+		container_t *parent = control_get_container_by_uuid_string(msg->container_uuids[1]);
+		if (container && parent) {
+			container_set_parent(container, parent);
+			control_send_message(CONTROL_RESPONSE_CMD_OK, fd);
+		} else {
+			control_send_message(CONTROL_RESPONSE_CMD_FAILED, fd);
+		}
+		break;
+
+	case CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT_NETNS:
+		IF_NULL_RETURN(container);
+		if (container_get_parent(container)) {
+			container_set_parent_netns(container, msg->netns_name);
+			control_send_message(CONTROL_RESPONSE_CMD_OK, fd);
+		} else {
+			control_send_message(CONTROL_RESPONSE_CMD_FAILED, fd);
+		}
+		break;
 
 	default:
 		WARN("Unsupported ControllerToDaemon command: %d received", msg->command);

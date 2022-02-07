@@ -174,6 +174,13 @@ message ControllerToDaemon {
 		// Request if CMLD handles pin input
 		CONTAINER_CMLD_HANDLES_PIN = 117;
 
+		// Set the parent of a container (e.g. Pod Sandbox)
+		// uuid of parent needs to be provided in container_uuids[1]]
+		CONTAINER_SET_PARENT = 118;
+
+		// Set the netns name inside the parent container which is
+		// to be joind by this container. Also need [netns_name]
+		CONTAINER_SET_PARENT_NETNS = 119;
 	}
 	required Command command = 1;
 
@@ -193,6 +200,7 @@ message ControllerToDaemon {
 	repeated string exec_args = 15; // arguments for command to be executed
 	optional bool exec_pty = 16 [ default = false ]; // assign pty to command
 	optional string exec_input = 17; // input to be sent to already executing command
+	optional string netns_name = 25; // netns name inside parent container to be joined on start
 
 	// Daemon
 	optional bytes guestos_config_file = 20;	// new/updated GuestOS config for PUSH_GUESTOS_CONFIG
