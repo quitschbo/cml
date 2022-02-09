@@ -122,8 +122,10 @@ struct compartment {
 	// indicate if the compartment is synced with its config
 	bool is_synced;
 
-	const compartment_t *parent; /* parent container containing net namespace to be joined */
-	char *parent_netns;	     /* netns name inside parent network namespace */
+	compartment_t *parent; /* parent container containing net namespace to be joined */
+	char *parent_netns;    /* netns name inside parent network namespace */
+	list_t *childs_list;   /* list of child compartments which have this compartment
+				        set as parent */
 };
 
 struct compartment_callback {
@@ -542,11 +544,43 @@ compartment_is_privileged(const compartment_t *compartment)
 	return compartment_uuid_is_c0id(compartment->uuid);
 }
 
-void
-compartment_set_parent(compartment_t *compartment, const compartment_t *parent)
+static void
+compartment_child_add(compartment_t *compartment, compartment_t *child)
 {
 	ASSERT(compartment);
+	// do not add child twice
+	if (list_find(compartment->childs_list, child))
+		return;
+	compartment->childs_list = list_append(compartment->childs_list, child);
+}
+
+static void
+compartment_child_remove(compartment_t *compartment, compartment_t *child)
+{
+	ASSERT(compartment);
+	compartment->childs_list = list_remove(compartment->childs_list, child);
+}
+
+void
+compartment_set_parent(compartment_t *compartment, compartment_t *parent)
+{
+	ASSERT(compartment);
+	IF_NULL_RETURN(parent);
+
+	// only allow stopped contaienrs to switch parent
+	IF_FALSE_RETURN(compartment_get_state(compartment) == COMPARTMENT_STATE_STOPPED);
+
 	compartment->parent = parent;
+	// if we set a parent also add this compartment as new child in the parent
+	compartment_child_add(parent, compartment);
+
+	// parent manages compartments network, thus remove networking submodule
+	compartment_module_instance_t *c_net =
+		compartment_module_get_mod_instance_by_name(compartment, "c_net");
+	if (c_net) {
+		compartment->module_instance_list = list_remove(compartment->module_instance_list, c_net);
+		compartment_module_instance_free(c_net);
+	}
 }
 
 const compartment_t *
@@ -607,6 +641,16 @@ compartment_cleanup(compartment_t *compartment, bool is_rebooting)
 	compartment_state_t state =
 		is_rebooting ? COMPARTMENT_STATE_REBOOTING : COMPARTMENT_STATE_STOPPED;
 	compartment_set_state(compartment, state);
+
+	// stop childs if any
+	for (list_t *l = compartment->childs_list; l; l = l->next) {
+		compartment_t *child = l->data;
+		if (compartment_get_state(child) == COMPARTMENT_STATE_STOPPED)
+		    continue;
+		if (compartment_get_state(child) == COMPARTMENT_STATE_SHUTTING_DOWN)
+		    continue;
+		compartment_stop(child);
+	}
 }
 
 void
@@ -1520,6 +1564,14 @@ compartment_destroy(compartment_t *compartment)
 
 		module->compartment_destroy(c_mod->instance);
 	}
+
+	/* remove this child from its parent */
+	compartment_t *parent = compartment->parent;
+	if (parent) {
+		DEBUG("Removing %s from parent %s!", compartment_get_name(compartment),
+		      compartment_get_name(parent));
+		compartment_child_remove(parent, compartment);
+	}
 }
 
 static void
@@ -1568,7 +1620,8 @@ compartment_set_state(compartment_t *compartment, compartment_state_t state)
 	// save previous state
 	compartment->prev_state = compartment->state;
 
-	DEBUG("Setting compartment state: %d", state);
+	DEBUG("Setting compartment state: %d of '%s'", state,
+	      compartment_get_description(compartment));
 	compartment->state = state;
 
 	compartment_notify_observers(compartment);

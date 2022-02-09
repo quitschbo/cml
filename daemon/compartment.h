@@ -243,7 +243,7 @@ compartment_is_privileged(const compartment_t *compartment);
  * Sets a parent compartment to this compartment.
  */
 void
-compartment_set_parent(compartment_t *compartment, const compartment_t *parent);
+compartment_set_parent(compartment_t *compartment, compartment_t *parent);
 
 /**
  * Returns the parent compartment of compartment.
