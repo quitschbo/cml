@@ -719,6 +719,31 @@ main(int argc, char *argv[])
 
 		mem_memset0(newpin_verify, strlen(newpin_verify));
 		mem_free0(newpin_verify);
+	} else if (!strcasecmp(command, "set_parent")) {
+		optind++;
+		// need at least one more argument (container config)
+		if (optind >= argc)
+			print_usage(argv[0]);
+
+		msg.command = CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT;
+		msg.n_container_uuids = 2;
+		msg.container_uuids = mem_new(char *, 2);
+		uuid_t *parent_uuid = get_container_uuid_new(argv[optind], sock);
+		msg.container_uuids[0] = mem_strdup(uuid_string(uuid));
+		msg.container_uuids[1] = mem_strdup(uuid_string(parent_uuid));
+		uuid_free(parent_uuid);
+		goto send_message;
+	} else if (!strcasecmp(command, "set_parent_netns")) {
+		optind++;
+		// need at least one more argument (container config)
+		if (optind >= argc)
+			print_usage(argv[0]);
+
+		const char *netns_name = argv[optind++];
+
+		msg.command = CONTROLLER_TO_DAEMON__COMMAND__CONTAINER_SET_PARENT_NETNS;
+		msg.netns_name = mem_strdup(netns_name);
+
 	} else
 		print_usage(argv[0]);
 
@@ -889,6 +914,8 @@ exit:
 		mem_memset0(msg.device_newpin, strlen(msg.device_newpin));
 		mem_free0(msg.device_newpin);
 	}
+	if (msg.netns_name)
+		mem_free0(msg.netns_name);
 
 	for (size_t i = 0; i < msg.n_container_uuids; ++i)
 		mem_free0(msg.container_uuids[i]);
