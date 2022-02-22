@@ -143,12 +143,13 @@ uevent_event_t *
 uevent_event_copy_new(const uevent_event_t *event);
 
 /**
- * This function forks a new child in the target netns (and userns) of netns_pid
- * in which the uevents should be injected. In the child the UEVENT netlink socket
- * is connected and a new message containing the raw uevent will be created and
- * sent to that socket.
+ * This function forks a new child in the target netns of netns_pid and userns
+ * of userns_pid in which the uevents should be injected.
+ * The pid should be the owning userns of the netns.
+ * In the child the UEVENT netlink socket is connected and a new message containing
+ * the raw uevent will be created and sent to that socket.
  */
 int
-uevent_event_inject_into_netns(uevent_event_t *event, pid_t netns_pid, bool join_userns);
+uevent_event_inject_into_netns(uevent_event_t *event, pid_t netns_pid, pid_t userns_pid);
 
 #endif /* UEVENT_H_ */

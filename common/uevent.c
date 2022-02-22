@@ -383,7 +383,7 @@ uevent_event_copy_new(const uevent_event_t *event)
  * sent to that socket.
  */
 int
-uevent_event_inject_into_netns(uevent_event_t *event, pid_t netns_pid, bool join_userns)
+uevent_event_inject_into_netns(uevent_event_t *event, pid_t netns_pid, pid_t userns_pid)
 {
 	int status;
 	char *uevent = event->msg.raw;
@@ -395,29 +395,29 @@ uevent_event_inject_into_netns(uevent_event_t *event, pid_t netns_pid, bool join
 		ERROR_ERRNO("Could not fork for switching to netns of %d", netns_pid);
 		return -1;
 	} else if (pid == 0) {
-		if (join_userns) {
-			char *usrns = mem_printf("/proc/%d/ns/user", netns_pid);
-			int usrns_fd = open(usrns, O_RDONLY);
-			if (usrns_fd == -1)
-				FATAL_ERRNO("Could not open userns file %s!", usrns);
-			mem_free0(usrns);
-			if (setns(usrns_fd, CLONE_NEWUSER) == -1)
-				FATAL_ERRNO("Could not join uesr namespace of pid %d!", netns_pid);
-			if (setuid(0) < 0)
-				FATAL_ERRNO("Could setuid to root in user namespace of pid %d!",
-					    netns_pid);
-			if (setgid(0) < 0)
-				FATAL_ERRNO("Could setgid to root in user namespace of pid %d!",
-					    netns_pid);
-			if (setgroups(0, NULL) < 0)
-				FATAL_ERRNO("Could setgroups to root in user namespace of pid %d!",
-					    netns_pid);
-		}
 		char *netns = mem_printf("/proc/%d/ns/net", netns_pid);
 		int netns_fd = open(netns, O_RDONLY);
 		if (netns_fd == -1)
 			FATAL_ERRNO("Could not open netns file %s!", netns);
 		mem_free0(netns);
+		if (userns_pid > -1) {
+			char *usrns = mem_printf("/proc/%d/ns/user", userns_pid);
+			int usrns_fd = open(usrns, O_RDONLY);
+			if (usrns_fd == -1)
+				FATAL_ERRNO("Could not open userns file %s!", usrns);
+			mem_free0(usrns);
+			if (setns(usrns_fd, CLONE_NEWUSER) == -1)
+				FATAL_ERRNO("Could not join uesr namespace of pid %d!", userns_pid);
+			if (setuid(0) < 0)
+				FATAL_ERRNO("Could setuid to root in user namespace of pid %d!",
+					    userns_pid);
+			if (setgid(0) < 0)
+				FATAL_ERRNO("Could setgid to root in user namespace of pid %d!",
+					    userns_pid);
+			if (setgroups(0, NULL) < 0)
+				FATAL_ERRNO("Could setgroups to root in user namespace of pid %d!",
+					    userns_pid);
+		}
 		if (setns(netns_fd, CLONE_NEWNET) == -1)
 			FATAL_ERRNO("Could not join network namespace of pid %d!", netns_pid);
 		nl_sock_t *target = nl_sock_uevent_new(0);
