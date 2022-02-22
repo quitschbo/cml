@@ -380,8 +380,9 @@ hotplug_netdev_move(uevent_event_t *event)
 	}
 
 	// if moving was successful also inject uevent
+	const container_t *parent = container_get_parent(container);
 	if (uevent_event_inject_into_netns(event, container_get_pid(container),
-					   container_has_userns(container)) < 0) {
+					   parent ? container_get_pid(parent) :  container_get_pid(container)) < 0) {
 		WARN("could not inject uevent into netns of container %s!",
 		     container_get_name(container));
 	} else {

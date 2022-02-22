@@ -90,6 +90,8 @@ c_uevent_handle_event_cb(unsigned actions, uevent_event_t *event, void *data)
 	int major = uevent_event_get_major(event);
 	int minor = uevent_event_get_minor(event);
 
+	const container_t *parent = container_get_parent(uevent->container);
+
 	if (!container_is_device_allowed(uevent->container, major, minor)) {
 		TRACE("skip not allowed device (%d:%d) for container %s", major, minor,
 		      container_get_name(uevent->container));
@@ -136,7 +138,8 @@ c_uevent_handle_event_cb(unsigned actions, uevent_event_t *event, void *data)
 
 send:
 	if (uevent_event_inject_into_netns(event, container_get_pid(uevent->container),
-					   container_has_userns(uevent->container)) < 0) {
+					   parent ? container_get_pid(parent) :
+					   container_get_pid(uevent->container)) < 0) {
 		WARN("Could not inject uevent into netns of container %s!",
 		     container_get_name(uevent->container));
 	} else {
