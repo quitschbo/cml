@@ -348,7 +348,7 @@ c_user_get_uid(void *usr)
 }
 
 static int
-c_user_chown_dev_cb(const char *path, const char *file, void *data)
+c_user_chown_dir_cb(const char *path, const char *file, void *data)
 {
 	struct stat s;
 	int ret = 0;
@@ -367,7 +367,7 @@ c_user_chown_dev_cb(const char *path, const char *file, void *data)
 
 	if (file_is_dir(file_to_chown)) {
 		TRACE("Path %s is dir", file_to_chown);
-		if (dir_foreach(file_to_chown, &c_user_chown_dev_cb, user) < 0) {
+		if (dir_foreach(file_to_chown, &c_user_chown_dir_cb, user) < 0) {
 			ERROR_ERRNO("Could not chown all dir contents in '%s'", file_to_chown);
 			ret--;
 		}
@@ -447,10 +447,9 @@ c_user_shift_ids(void *usr, const char *path, bool is_root)
 		goto success;
 	}
 
-	// if dev or a cgroup subsys just chown the files
-	if ((strlen(path) >= 4 && !strcmp(strrchr(path, '\0') - 4, "/dev")) ||
-	    (strstr(path, "/cgroup") != NULL)) {
-		if (dir_foreach(path, &c_user_chown_dev_cb, user) < 0) {
+	// if cgroup subsys just chown the files
+	if (strstr(path, "/cgroup") != NULL) {
+		if (dir_foreach(path, &c_user_chown_dir_cb, user) < 0) {
 			ERROR("Could not chown %s to target uid:gid (%d:%d)", path, user->uid_start,
 			      user->uid_start);
 			goto error;
@@ -466,7 +465,7 @@ c_user_shift_ids(void *usr, const char *path, bool is_root)
 				    user->uid_start, user->uid_start);
 			goto error;
 		}
-		if (dir_foreach(path, &c_user_chown_dev_cb, user) < 0) {
+		if (dir_foreach(path, &c_user_chown_dir_cb, user) < 0) {
 			ERROR("Could not chown %s to target uid:gid (%d:%d)", path, user->uid_start,
 			      user->uid_start);
 			goto error;
@@ -588,59 +587,23 @@ c_user_shift_mounts(void *usr)
 	if (!container_has_userns(user->container))
 		return 0;
 
-	char *target_dev, *saved_dev;
-	target_dev = saved_dev = NULL;
-
 	TRACE("uid %d, euid %d", getuid(), geteuid());
 	for (list_t *l = user->marks; l; l = l->next) {
 		struct c_user_shift *shift_mark = l->data;
-
-		// save already mounted dev to remount after new rootfs mount
-		if (shift_mark->is_root) {
-			target_dev = mem_printf("%s/dev", shift_mark->target);
-			saved_dev = mem_printf("%s/%s/dev", SHIFTFS_DIR,
-					       uuid_string(container_get_uuid(user->container)));
-			if (dir_mkdir_p(saved_dev, 0777) < 0) {
-				ERROR_ERRNO("Could not mkdir temporary dev dir '%s'", saved_dev);
-				goto error;
-			}
-			if (mount(target_dev, saved_dev, NULL, MS_BIND, NULL) < 0) {
-				ERROR_ERRNO("Could not move dev '%s' to saved_dev '%s'", target_dev,
-					    saved_dev);
-			}
-		}
 
 		// mount the shifted user ids to new root
 		if (mount(shift_mark->mark, shift_mark->target, "shiftfs",
 			  cmld_is_shiftfs_supported() ? 0 : MS_BIND, NULL) < 0) {
 			ERROR_ERRNO("Could not remount shiftfs mark %s to %s", shift_mark->mark,
 				    shift_mark->target);
-			goto error;
+			return -1;
 		} else {
 			INFO("Successfully shifted root uid/gid for userns mount %s",
 			     shift_mark->target);
 		}
-
-		// remount saved dev location at new shifted rootfs
-		if (shift_mark->is_root) {
-			if (mount(saved_dev, target_dev, NULL, MS_BIND, NULL) < 0) {
-				ERROR_ERRNO("Could mount dev '%s' in new root", target_dev);
-			}
-			INFO("Successfully moved dev to shifted rootfs at '%s'", target_dev);
-		}
 	}
 
-	if (target_dev)
-		mem_free0(target_dev);
-	if (saved_dev)
-		mem_free0(saved_dev);
 	return 0;
-error:
-	if (target_dev)
-		mem_free0(target_dev);
-	if (saved_dev)
-		mem_free0(saved_dev);
-	return -1;
 }
 
 static int
