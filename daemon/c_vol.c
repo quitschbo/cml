@@ -1203,6 +1203,24 @@ c_vol_populate_dev_filter_cb(const char *dev_node, void *data)
 	return true;
 }
 
+struct tty_cb_data {
+	bool found;
+	char *name;
+};
+
+static int
+c_vol_dev_get_tty_cb(UNUSED const char *path, const char *file, void *data)
+{
+	struct tty_cb_data *tty_data = data;
+
+	if (!tty_data->found && strlen(file) >= 4 && strstr(file, "tty")) {
+		tty_data->name = mem_strdup(file);
+		INFO("Found tty: %s", tty_data->name);
+		tty_data->found = true;
+	}
+	return 0;
+}
+
 static int
 c_vol_mount_dev(c_vol_t *vol)
 {
@@ -1239,6 +1257,24 @@ c_vol_mount_dev(c_vol_t *vol)
 	} else {
 		DEBUG("Applied MS_SHARED to %s", dev_mnt);
 	}
+
+	INFO("Populating container's /dev.");
+	if (dir_copy_folder("/dev", dev_mnt, &c_vol_populate_dev_filter_cb, vol) < 0) {
+		ERROR_ERRNO("Could not populate /dev!");
+		goto error;
+	}
+
+	/* link first /dev/tty* to /dev/console for systemd containers */
+	struct tty_cb_data tty_data = { .found = false, .name = NULL };
+	dir_foreach(dev_mnt, c_vol_dev_get_tty_cb, &tty_data);
+	if (tty_data.name != NULL) {
+		char *lnk_path = mem_printf("%s/console", dev_mnt);
+		if (symlink(tty_data.name, lnk_path))
+			WARN_ERRNO("Could not link %s to /dev/console in container", tty_data.name);
+		mem_free0(lnk_path);
+		mem_free0(tty_data.name);
+	}
+
 	if (container_shift_ids(vol->container, dev_mnt, false)) {
 	        ERROR_ERRNO("Could not shift ids for dev on '%s'", dev_mnt);
 	        goto error;
@@ -1475,55 +1511,6 @@ error:
 	return -COMPARTMENT_ERROR_VOL;
 }
 
-struct tty_cb_data {
-	bool found;
-	char *name;
-};
-
-static int
-c_vol_dev_get_tty_cb(UNUSED const char *path, const char *file, void *data)
-{
-	struct tty_cb_data *tty_data = data;
-
-	if (!tty_data->found && strlen(file) >= 4 && strstr(file, "tty")) {
-		tty_data->name = mem_strdup(file);
-		INFO("Found tty: %s", tty_data->name);
-		tty_data->found = true;
-	}
-	return 0;
-}
-
-static int
-c_vol_start_pre_exec(void *volp)
-{
-	c_vol_t *vol = volp;
-	ASSERT(vol);
-
-	INFO("Populating container's /dev.");
-	char *dev_mnt = mem_printf("%s/%s", vol->root, "dev");
-	if (dir_copy_folder("/dev", dev_mnt, &c_vol_populate_dev_filter_cb, vol) < 0) {
-		ERROR_ERRNO("Could not populate /dev!");
-		mem_free0(dev_mnt);
-		return -COMPARTMENT_ERROR_VOL;
-	}
-
-	/* link first /dev/tty* to /dev/console for systemd containers */
-	struct tty_cb_data tty_data = { .found = false, .name = NULL };
-	dir_foreach(dev_mnt, c_vol_dev_get_tty_cb, &tty_data);
-	if (tty_data.name != NULL) {
-		char *lnk_path = mem_printf("%s/console", dev_mnt);
-		if (symlink(tty_data.name, lnk_path))
-			WARN_ERRNO("Could not link %s to /dev/console in container", tty_data.name);
-		mem_free0(lnk_path);
-		mem_free0(tty_data.name);
-	}
-
-	if (container_shift_ids(vol->container, dev_mnt, false) < 0)
-		WARN("Failed to setup ids for %s in user namespace!", dev_mnt);
-
-	mem_free0(dev_mnt);
-	return 0;
-}
 static int
 c_vol_mount_proc_and_sys(const c_vol_t *vol, const char *dir)
 {
@@ -1829,7 +1816,7 @@ static compartment_module_t c_vol_module = {
 	.start_child_early = c_vol_start_child_early,
 	.start_pre_clone = NULL,
 	.start_post_clone = NULL,
-	.start_pre_exec = c_vol_start_pre_exec,
+	.start_pre_exec = NULL,
 	.start_post_exec = NULL,
 	.start_child = c_vol_start_child,
 	.start_pre_exec_child = NULL,
