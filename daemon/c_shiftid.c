@@ -510,13 +510,11 @@ c_shiftid_shift_mounts(void *shiftidp)
 		}
 
 		// mount the shifted user ids to new root
+		IF_TRUE_RETVAL(dir_mkdir_p(mnt->target, 0777) < 0, -1);
 		if (mount(mnt->mark, mnt->target, "shiftfs",
 			  cmld_is_shiftfs_supported() ? 0 : MS_BIND, NULL) < 0) {
 			ERROR_ERRNO("Could not remount shiftfs mark %s to %s", mnt->mark,
 				    mnt->target);
-			for (;;)
-				;
-			return -1;
 		} else {
 			INFO("Successfully shifted root uid/gid for userns mount %s", mnt->target);
 		}
