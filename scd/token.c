@@ -200,6 +200,9 @@ scd_tokencontrol_cb_recv_message(int fd, unsigned events, event_io_t *io, void *
 	return;
 
 connection_err:
+	// skip if token was removed by TOKEN_REMOVE
+	IF_NULL_RETURN(token);
+
 	token->token_data->tctrl->events = list_remove(token->token_data->tctrl->events, io);
 	event_remove_io(io);
 	event_io_free(io);
