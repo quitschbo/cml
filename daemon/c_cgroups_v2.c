@@ -506,15 +506,6 @@ c_cgroups_start_post_clone(void *cgroupsp)
 	event_add_inotify(cgroups->inotify_cgroup_events);
 	mem_free0(events_path);
 
-	return 0;
-}
-
-static int
-c_cgroups_start_pre_exec(void *cgroupsp)
-{
-	c_cgroups_t *cgroups = cgroupsp;
-	ASSERT(cgroups);
-
 	int ret = -1;
 
 	// activate controllers
@@ -633,7 +624,7 @@ static compartment_module_t c_cgroups_module = {
 	.start_child_early = NULL,
 	.start_pre_clone = NULL,
 	.start_post_clone = c_cgroups_start_post_clone,
-	.start_pre_exec = c_cgroups_start_pre_exec,
+	.start_pre_exec = NULL,
 	.start_post_exec = NULL,
 	.start_child = NULL,
 	.start_pre_exec_child = c_cgroups_start_pre_exec_child,
