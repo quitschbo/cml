@@ -57,6 +57,10 @@ extern char *c_cgroups_subtree;
 #define LEGACY_DEVCG_ACC_ALL (BPF_DEVCG_ACC_READ | BPF_DEVCG_ACC_WRITE | BPF_DEVCG_ACC_MKNOD)
 #define LEGACY_DEVCG_DEV_ALL (BPF_DEVCG_DEV_BLOCK | BPF_DEVCG_DEV_CHAR)
 
+#ifndef BPF_DEVCG_ACC_MKNOD_UNS
+#define BPF_DEVCG_ACC_MKNOD_UNS (1ULL << 3)
+#endif
+
 typedef struct c_cgroups_dev_item {
 	int major, minor;
 	short type;
@@ -238,7 +242,7 @@ c_cgroups_dev_from_rule_new(const char *rule)
 
 	char *access = strtok_r(NULL, ":", &pointer);
 	if (!access) {
-		dev_item->access = LEGACY_DEVCG_ACC_ALL;
+		dev_item->access = LEGACY_DEVCG_ACC_ALL | BPF_DEVCG_ACC_MKNOD_UNS;
 	} else {
 		IF_TRUE_GOTO_TRACE((strlen(access) > 3) || (strlen(access) == 0), error);
 
@@ -252,6 +256,7 @@ c_cgroups_dev_from_rule_new(const char *rule)
 				break;
 			case 'm':
 				dev_item->access |= BPF_DEVCG_ACC_MKNOD;
+				dev_item->access |= BPF_DEVCG_ACC_MKNOD_UNS;
 				break;
 			default:
 				goto error;
