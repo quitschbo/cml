@@ -500,4 +500,11 @@ compartment_wait_for_child(compartment_t *compartment, char *name, pid_t pid);
 const char *
 compartment_get_debug_log_dir(const compartment_t *compartment);
 
+char **
+compartment_get_init_argv(const compartment_t *compartment);
+
+void
+compartment_set_init_argv(compartment_t *compartment, const char *const *init_argv,
+			  size_t init_argv_len);
+
 #endif /* COMPARTMENT_H */

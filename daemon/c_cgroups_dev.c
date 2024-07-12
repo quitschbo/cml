@@ -748,6 +748,9 @@ c_cgroups_dev_start_post_clone(void *cgroups_devp)
 		if (c_cgroups_dev_allow(cgroups_dev, "c 10:232 rwm") < 0)
 			return -COMPARTMENT_ERROR_CGROUPS;
 		INFO("Allowing acces to /dev/kvm for lkvm inside new namespace");
+		if (c_cgroups_dev_allow(cgroups_dev, "c 10:241 rwm") < 0)
+			return -COMPARTMENT_ERROR_CGROUPS;
+		INFO("Allowing acces to /dev/vhost-vsock for lkvm inside new namespace");
 	}
 
 	/* allow container specific device whitelist */

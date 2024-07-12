@@ -80,6 +80,8 @@
 #define SHARED_FILES_STORE_SIZE 100
 
 #define BUSYBOX_PATH "/bin/busybox"
+#define LKVM_PATH "/usr/bin/lkvm"
+#define LKVM_GUEST_KERNEL_PATH "/boot/bzImage-gyroidos"
 
 #ifndef FALLOC_FL_ZERO_RANGE
 #define FALLOC_FL_ZERO_RANGE 0x10
@@ -93,6 +95,62 @@ typedef struct c_vol {
 	mount_t *mnt;
 	mount_t *mnt_setup;
 } c_vol_t;
+
+/******************************************************************************/
+
+#ifndef MOVE_MOUNT_F_SYMLINKS
+#define MOVE_MOUNT_F_SYMLINKS 0x00000001
+#endif
+
+#ifndef MOVE_MOUNT_F_AUTOMOUNTS
+#define MOVE_MOUNT_F_AUTOMOUNTS 0x00000002
+#endif
+
+#ifndef MOVE_MOUNT_F_EMPTY_PATH
+#define MOVE_MOUNT_F_EMPTY_PATH 0x00000004
+#endif
+
+#ifndef MOVE_MOUNT_T_SYMLINKS
+#define MOVE_MOUNT_T_SYMLINKS 0x00000010
+#endif
+
+#ifndef MOVE_MOUNT_T_AUTOMOUNTS
+#define MOVE_MOUNT_T_AUTOMOUNTS 0x00000020
+#endif
+
+#ifndef MOVE_MOUNT_T_EMPTY_PATH
+#define MOVE_MOUNT_T_EMPTY_PATH 0x00000040
+#endif
+
+#ifndef MOVE_MOUNT__MASK
+#define MOVE_MOUNT__MASK 0x00000077
+#endif
+
+// clang-format off
+#ifndef __NR_move_mount
+	#if defined __alpha__
+		#define __NR_move_mount 539
+	#elif defined _MIPS_SIM
+		#if _MIPS_SIM == _MIPS_SIM_ABI32
+			#define __NR_move_mount 4429
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_NABI32
+			#define __NR_move_mount 6429
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_ABI64
+			#define __NR_move_mount 5429
+		#endif
+	#elif defined __ia64__
+		#define __NR_move_mount (428 + 1024)
+	#else
+		#define __NR_move_mount 429
+	#endif
+#endif
+// clang-format on
+
+extern int
+move_mount(int from_dirfd, const char *from_path, int to_dirfd, const char *to_path,
+	   unsigned int flags);
 
 /******************************************************************************/
 
@@ -619,20 +677,20 @@ c_vol_mount_dir_bind(const char *src, const char *dst, unsigned long flags)
 }
 
 /*
- * Copy busybox binary to target_base directory.
+ * Copy static binary to target_base directory.
  * Remeber, this will only succeed if targetfs is writable.
  */
 static int
-c_vol_setup_busybox_copy(const char *target_base)
+c_vol_setup_binary_copy(const char *target_base, const char *binary_path)
 {
 	int ret = 0;
-	char *target_bin = mem_printf("%s%s", target_base, BUSYBOX_PATH);
+	char *target_bin = mem_printf("%s%s", target_base, binary_path);
 	char *target_dir = mem_strdup(target_bin);
 	char *target_dir_p = dirname(target_dir);
 	if ((ret = dir_mkdir_p(target_dir_p, 0755)) < 0) {
 		WARN_ERRNO("Could not mkdir '%s' dir", target_dir_p);
-	} else if (file_exists("/bin/busybox")) {
-		file_copy("/bin/busybox", target_bin, -1, 512, 0);
+	} else if (file_exists(binary_path)) {
+		file_copy(binary_path, target_bin, -1, 512, 0);
 		INFO("Copied %s to container", target_bin);
 		if (chmod(target_bin, 0755)) {
 			WARN_ERRNO("Could not set %s executable", target_bin);
@@ -649,15 +707,21 @@ c_vol_setup_busybox_copy(const char *target_base)
 }
 
 static int
-c_vol_setup_busybox_install(void)
+c_vol_setup_busybox_install(const char *dir)
 {
 	// skip if busybox was not coppied
-	IF_FALSE_RETVAL_TRACE(file_exists("/bin/busybox"), 0);
+	IF_FALSE_RETVAL_TRACE(file_exists(BUSYBOX_PATH), 0);
 
-	IF_TRUE_RETVAL(dir_mkdir_p("/bin", 0755) < 0, -1);
-	IF_TRUE_RETVAL(dir_mkdir_p("/sbin", 0755) < 0, -1);
+	// some busy box binaries install symlinks to /usr/bin/busybox
+	//IF_TRUE_RETVAL(dir_mkdir_p("/bin", 0755) < 0, -1);
+	//IF_TRUE_RETVAL(dir_mkdir_p("/sbin", 0755) < 0, -1);
 
-	const char *const argv[] = { "busybox", "--install", "-s", NULL };
+	//if (symlink("/usr/bin", "/bin"))
+	//	WARN_ERRNO("Could not link /bin in container");
+	//if (symlink("/usr/sbin", "/sbin"))
+	//	WARN_ERRNO("Could not link /sbin in container");
+
+	const char *const argv[] = { BUSYBOX_PATH, "--install", "-s", dir ? dir : NULL, NULL };
 	return proc_fork_and_execvp(argv);
 }
 
@@ -763,7 +827,7 @@ c_vol_mount_image(c_vol_t *vol, const char *root, const mount_entry_t *mntent)
 			}
 			DEBUG("Changed permissions of %s to 0755", dir);
 
-			if (is_root && setup_mode && c_vol_setup_busybox_copy(dir) < 0)
+			if (is_root && setup_mode && c_vol_setup_binary_copy(dir, BUSYBOX_PATH) < 0)
 				WARN("Cannot copy busybox for setup mode!");
 			goto final;
 		} else {
@@ -1792,11 +1856,124 @@ error:
 	return -1;
 }
 
+/*
+ * This function generates an inermediate rootfs which only
+ * contains the VMM (defined by LKVM_PATH) /dev (with idmapping)
+ * and the host's /boot which usually contains a kernel
+ */
+static int
+c_vol_setup_vmm_mount(c_vol_t *vol)
+{
+	char *kvm_container_root = mem_printf("%s-kvm", vol->root);
+	char *kvm_vmm_dev = mem_printf("%s/dev", vol->root);
+	char *kvm_dev = mem_printf("%s-dev", vol->root);
+	char *kvm_log = mem_printf("%s/kvm-log", container_get_images_dir(vol->container));
+	char *kvm_vmm_log = mem_printf("%s/var/log", vol->root);
+	char *kvm_vmm_container_root = mem_printf("%s/%s", vol->root, vol->root);
+
+	if (mkdir(kvm_dev, 0755) < 0 && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", kvm_dev);
+		goto error;
+	}
+
+	if (mount(kvm_vmm_dev, kvm_dev, NULL, MS_BIND, NULL) < 0) {
+		ERROR_ERRNO("Could not bind mount old_dev to %s", kvm_dev);
+		goto error;
+	}
+
+	if (umount(kvm_vmm_dev) < 0) {
+		ERROR_ERRNO("Could not umount %s", kvm_vmm_dev);
+		goto error;
+	}
+
+	if (mkdir(kvm_container_root, 0755) < 0 && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", kvm_container_root);
+		goto error;
+	}
+
+	if (move_mount(AT_FDCWD, vol->root, AT_FDCWD, kvm_container_root, 0)) {
+		ERROR_ERRNO("Could not move container root to %s", kvm_container_root);
+		goto error;
+	}
+
+	DEBUG("Mounting VMM temporary rootfs '/'");
+	if (mount("tmpfs", vol->root, "tmpfs", MS_RELATIME | MS_NOSUID | MS_NODEV, NULL) < 0) {
+		ERROR_ERRNO("Could not mount tmpfs for VMM '%s'.", vol->root);
+		goto error;
+	}
+
+	if (mkdir(kvm_vmm_dev, 0755) < 0 && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", kvm_vmm_dev);
+		goto error;
+	}
+
+	if (mount(kvm_dev, kvm_vmm_dev, NULL, MS_BIND, NULL) < 0) {
+		ERROR_ERRNO("Could not bind mount old_dev to %s", kvm_vmm_dev);
+		goto error;
+	}
+
+	if (umount(kvm_dev) < 0) {
+		ERROR_ERRNO("Could not umount %s", kvm_dev);
+		goto error;
+	}
+
+	if (dir_mkdir_p(kvm_vmm_log, 0755) < 0 && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", kvm_vmm_log);
+		goto error;
+	}
+
+	if (mount(kvm_log, kvm_vmm_log, NULL, MS_BIND, NULL) < 0) {
+		ERROR_ERRNO("Could not bind mount log dir to %s", kvm_vmm_log);
+		goto error;
+	}
+
+	if (dir_mkdir_p(kvm_vmm_container_root, 0755) < 0 && errno != EEXIST) {
+		ERROR_ERRNO("Could not mkdir %s", kvm_vmm_container_root);
+		goto error;
+	}
+
+	if (move_mount(AT_FDCWD, kvm_container_root, AT_FDCWD, kvm_vmm_container_root, 0)) {
+		ERROR_ERRNO("Could not move container root to %s", kvm_vmm_container_root);
+		goto error;
+	}
+
+	if (c_vol_setup_binary_copy(vol->root, LKVM_PATH) < 0) {
+		ERROR_ERRNO("Cannot copy vmm binary to VMM intermediate root!");
+		goto error;
+	}
+
+	if (c_vol_setup_binary_copy(vol->root, LKVM_GUEST_KERNEL_PATH) < 0) {
+		ERROR_ERRNO("Cannot copy vmm binary to VMM intermediate root!");
+		goto error;
+	}
+
+	mem_free0(kvm_vmm_container_root);
+	mem_free0(kvm_vmm_dev);
+	mem_free0(kvm_vmm_log);
+	mem_free0(kvm_container_root);
+	mem_free0(kvm_log);
+	mem_free0(kvm_dev);
+
+	return 0;
+
+error:
+	mem_free0(kvm_vmm_container_root);
+	mem_free0(kvm_vmm_dev);
+	mem_free0(kvm_vmm_log);
+	mem_free0(kvm_container_root);
+	mem_free0(kvm_log);
+	mem_free0(kvm_dev);
+
+	return -1;
+}
+
 static int
 c_vol_start_child(void *volp)
 {
 	c_vol_t *vol = volp;
 	ASSERT(vol);
+
+	bool is_kvm = (container_get_type(vol->container) == CONTAINER_TYPE_KVM);
 
 	// remount proc to reflect namespace change
 	if (!container_has_userns(vol->container)) {
@@ -1809,16 +1986,6 @@ c_vol_start_child(void *volp)
 	}
 	if (mount("proc", "/proc", "proc", MS_RELATIME | MS_NOSUID, NULL) < 0) {
 		ERROR_ERRNO("Could not remount /proc");
-		goto error;
-	}
-
-	if (container_get_type(vol->container) == CONTAINER_TYPE_KVM)
-		return 0;
-
-	INFO("Switching to new rootfs in '%s'", vol->root);
-
-	if (c_vol_mount_proc_and_sys(vol, vol->root) == -1) {
-		ERROR_ERRNO("Could not mount proc and sys");
 		goto error;
 	}
 
@@ -1846,6 +2013,15 @@ c_vol_start_child(void *volp)
 
 	mem_free0(cservice_bin);
 	mem_free0(cservice_dir);
+
+	IF_TRUE_GOTO_ERROR(is_kvm && c_vol_setup_vmm_mount(vol), error);
+
+	if (c_vol_mount_proc_and_sys(vol, vol->root) == -1) {
+		ERROR_ERRNO("Could not mount proc and sys");
+		goto error;
+	}
+
+	INFO("Switching to new rootfs in '%s'", vol->root);
 
 	if (cmld_is_hostedmode_active())
 		IF_TRUE_GOTO(c_vol_pivot_root(vol) < 0, error);
@@ -1909,7 +2085,7 @@ c_vol_start_child(void *volp)
 	}
 	DEBUG("Changed permissions of %s to 0755", CMLD_SOCKET_DIR);
 
-	if (container_has_setup_mode(vol->container) && c_vol_setup_busybox_install() < 0)
+	if (container_has_setup_mode(vol->container) && c_vol_setup_busybox_install(NULL) < 0)
 		WARN("Cannot install busybox symlinks for setup mode!");
 
 	char *mount_output = file_read_new("/proc/self/mounts", 2048);

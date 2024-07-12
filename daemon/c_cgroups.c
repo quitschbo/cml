@@ -503,6 +503,9 @@ c_cgroups_devices_init(c_cgroups_t *cgroups)
 		if (c_cgroups_devices_allow(cgroups, "c 10:232 rwm") < 0)
 			return -1;
 		INFO("Allowing acces to /dev/kvm for lkvm inside new namespace");
+		if (c_cgroups_devices_allow(cgroups, "c 10:123 rwm") < 0)
+			return -1;
+		INFO("Allowing acces to /dev/vsock for lkvm inside new user namespace");
 	}
 
 	/* allow container specific device whitelist */

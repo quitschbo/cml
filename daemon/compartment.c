@@ -352,6 +352,12 @@ compartment_new(const uuid_t *uuid, const char *name, uint64_t flags, const char
 		INFO("striped COMPARTMENT_FLAG_MODULE_LOAD since module signatures are not enforced!");
 	}
 
+	/* enable COMPARTMENT_FLAG_MODULE_LOAD, this will mount /lib/modules */
+	if (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) {
+		compartment->flags |= COMPARTMENT_FLAG_MODULE_LOAD;
+		INFO("set COMPARTMENT_FLAG_MODULE_LOAD for type KVM!");
+	}
+
 	/* do not forget to update compartment->description in the setters of uuid and name */
 	compartment->description =
 		mem_printf("%s (%s)", compartment->name, uuid_string(compartment->uuid));
@@ -365,6 +371,14 @@ compartment_new(const uuid_t *uuid, const char *name, uint64_t flags, const char
 
 	if (file_exists("/proc/self/ns/ipc"))
 		compartment->flags |= COMPARTMENT_FLAG_NS_IPC;
+
+	///* strip out NS flags if COMPARTMENT_TYPE_KVM */
+	//if (flags & COMPARTMENT_FLAG_TYPE_KVM) {
+	//	compartment->flags &= ~COMPARTMENT_FLAG_NS_USER;
+	//	compartment->flags &= ~COMPARTMENT_FLAG_NS_NET;
+	//	compartment->flags &= ~COMPARTMENT_FLAG_NS_IPC;
+	//	INFO("striped COMPARTMENT_FLAG_NS_* since type is KVM!");
+	//}
 
 	compartment->csock_list = NULL;
 	compartment->observer_list = NULL;
@@ -480,13 +494,20 @@ compartment_init_env_prepend(compartment_t *compartment, char **init_env, size_t
 {
 	IF_TRUE_RETURN(init_env == NULL || init_env_len <= 0);
 
+	// do not accept a NULL terminated array as input
+	IF_TRUE_RETURN_WARN(init_env[init_env_len - 1] == NULL);
+
 	// construct a NULL terminated env buffer for execve
+	// if not yet NULL terminated add NULL pointer
+	if (compartment->init_env[compartment->init_env_len - 1] != NULL) {
+		if (__builtin_add_overflow(compartment->init_env_len, 1,
+					   &compartment->init_env_len)) {
+			WARN("Overflow detected when calculating buffer size for compartment's env");
+			return;
+		}
+	}
 	size_t total_len;
 	if (__builtin_add_overflow(compartment->init_env_len, init_env_len, &total_len)) {
-		WARN("Overflow detected when calculating buffer size for compartment's env");
-		return;
-	}
-	if (__builtin_add_overflow(total_len, 1, &total_len)) {
 		WARN("Overflow detected when calculating buffer size for compartment's env");
 		return;
 	}
@@ -496,7 +517,7 @@ compartment_init_env_prepend(compartment_t *compartment, char **init_env, size_t
 	size_t i = 0;
 	for (; i < init_env_len; i++)
 		compartment->init_env[i] = mem_strdup(init_env[i]);
-	for (size_t j = 0; j < compartment->init_env_len; ++j)
+	for (size_t j = 0; j < compartment->init_env_len - 1; ++j)
 		compartment->init_env[i + j] = mem_strdup(init_env_old[j]);
 
 	if (init_env_old) {
@@ -848,7 +869,7 @@ compartment_start_child(void *data)
 	int ret = 0;
 
 	compartment_t *compartment = data;
-	char *kvm_root = mem_printf("/tmp/%s", uuid_string(compartment->uuid));
+	//char *kvm_root = mem_printf("/tmp/%s-kvm", uuid_string(compartment->uuid));
 
 	/*******************************************************************/
 	// wait on synchronization socket for start message code from parent
@@ -888,12 +909,12 @@ compartment_start_child(void *data)
 		}
 	}
 
-	char *root = (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) ? kvm_root : "/";
-	if (chdir(root) < 0) {
-		WARN_ERRNO("Could not chdir to \"%s\" in compartment %s", root,
-			   uuid_string(compartment->uuid));
-		goto error;
-	}
+	//char *root = (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) ? kvm_root : "/";
+	//if (chdir(root) < 0) {
+	//	WARN_ERRNO("Could not chdir to \"%s\" in compartment %s", root,
+	//		   uuid_string(compartment->uuid));
+	//	goto error;
+	//}
 
 	// bind sockets in csock_list
 	// make sure this is done *after* the c_vol hook, which brings the childs mounts into place
@@ -946,6 +967,12 @@ compartment_start_child(void *data)
 		}
 	}
 
+	if (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) {
+		if (compartment->init)
+			mem_free0(compartment->init);
+		compartment->init = mem_strdup(compartment->init_argv[0]);
+	}
+
 	DEBUG("Will start %s after closing filedescriptors of %s", compartment->init,
 	      compartment_get_description(compartment));
 
@@ -958,32 +985,37 @@ compartment_start_child(void *data)
 		DEBUG("\t%s", *arg);
 	}
 
-	if (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) {
-		int fd_master;
-		int pid = forkpty(&fd_master, NULL, NULL, NULL);
+	//if (compartment->flags & COMPARTMENT_FLAG_TYPE_KVM) {
+	//	int fd_master;
+	//	int pid = forkpty(&fd_master, NULL, NULL, NULL);
 
-		if (pid == -1) {
-			ERROR_ERRNO("Forkpty() failed!");
-			goto error;
-		}
-		if (pid == 0) { // child
-			char *const argv[] = { "/usr/bin/lkvm", "run", "-d", kvm_root,
-					       "--vsock",	"3",   NULL };
-			execv(argv[0], argv);
-			WARN("Could not run exec for kvm compartment %s",
-			     uuid_string(compartment->uuid));
-		} else { // parent
-			char buffer[128];
-			ssize_t read_bytes;
-			char *kvm_log = mem_printf("%s.kvm.log", compartment->debug_log_dir);
-			read_bytes = read(fd_master, buffer, 128);
-			file_write(kvm_log, buffer, read_bytes);
-			while ((read_bytes = read(fd_master, buffer, 128))) {
-				file_write_append(kvm_log, buffer, read_bytes);
-			}
-			return COMPARTMENT_ERROR;
-		}
-	}
+	//	if (pid == -1) {
+	//		ERROR_ERRNO("Forkpty() failed!");
+	//		goto error;
+	//	}
+	//	if (pid == 0) { // child
+	//		execve(compartment->init_argv[0], compartment->init_argv,
+	//		       compartment->init_env);
+	//		WARN("Could not run exec for kvm compartment %s",
+	//		     uuid_string(compartment->uuid));
+	//		_exit(-1);
+	//	} else { // parent
+	//		 //char buffer[128];
+	//		 //ssize_t read_bytes;
+	//		 //char *kvm_log = mem_printf("%s.kvm.log", compartment->debug_log_dir);
+	//		 //read_bytes = read(fd_master, buffer, 128);
+	//		 //file_write(kvm_log, buffer, read_bytes);
+	//		 //while ((read_bytes = read(fd_master, buffer, 128))) {
+	//		 //        file_write_append(kvm_log, buffer, read_bytes);
+	//		 //}
+	//		int status;
+	//		if (proc_waitpid(pid, &status, 0) == pid) {
+	//			DEBUG("Reaped kvm helper (pid=%d) for compartment %s", pid,
+	//			      compartment->name);
+	//		}
+	//		return COMPARTMENT_ERROR;
+	//	}
+	//}
 
 	if (compartment_get_state(compartment) != COMPARTMENT_STATE_SETUP) {
 		DEBUG("After closing all file descriptors no further debugging info can be printed");
@@ -1023,6 +1055,8 @@ error:
 	if (compartment_close_all_fds()) {
 		WARN("Closing all file descriptors in compartment start error failed");
 	}
+	for (;;)
+		;
 	return ret; // exit the child process
 }
 
@@ -1881,4 +1915,41 @@ compartment_get_debug_log_dir(const compartment_t *compartment)
 {
 	ASSERT(compartment);
 	return compartment->debug_log_dir;
+}
+
+char **
+compartment_get_init_argv(const compartment_t *compartment)
+{
+	ASSERT(compartment);
+	return compartment->init_argv;
+}
+
+void
+compartment_set_init_argv(compartment_t *compartment, const char *const *init_argv,
+			  size_t init_argv_len)
+{
+	ASSERT(compartment);
+
+	size_t len = init_argv_len;
+	if (init_argv[len - 1] != NULL) {
+		if (__builtin_add_overflow(len, 1, &len)) {
+			WARN("Overflow detected when calculating buffer size for compartment's argv");
+			return;
+		}
+	} else {
+		// we already have a NULL terminator do ignore in copy loop below
+		init_argv_len--;
+	}
+
+	if (compartment->init_argv) {
+		for (char **arg = compartment->init_argv; *arg; arg++) {
+			mem_free0(*arg);
+		}
+		mem_free0(compartment->init_argv);
+	}
+
+	compartment->init_argv = mem_new0(char *, len);
+
+	for (size_t i = 0; i < init_argv_len; ++i)
+		compartment->init_argv[i] = mem_strdup(init_argv[i]);
 }
