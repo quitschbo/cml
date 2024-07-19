@@ -643,7 +643,7 @@ test_ssl_verify_signature_from_digest_pss_psscert_sha512(UNUSED const MunitParam
 	return MUNIT_OK;
 }
 
-static MunitResult
+UNUSED static MunitResult
 test_ssl_verify_signature_from_digest_pss_ssacert(UNUSED const MunitParameter params[],
 						  UNUSED void *data)
 {
@@ -673,7 +673,7 @@ test_ssl_verify_signature_from_digest_pss_ssacert(UNUSED const MunitParameter pa
 	return MUNIT_OK;
 }
 
-static MunitResult
+UNUSED static MunitResult
 test_ssl_verify_signature_from_digest_pss_ssacert_sha512(UNUSED const MunitParameter params[],
 							 UNUSED void *data)
 {
@@ -766,7 +766,7 @@ test_ssl_verify_signature_from_digest_ssa_psscert_sha512(UNUSED const MunitParam
 	return MUNIT_OK;
 }
 
-static MunitResult
+UNUSED static MunitResult
 test_ssl_verify_signature_from_digest_ssa_ssacert(UNUSED const MunitParameter params[],
 						  UNUSED void *data)
 {
@@ -796,7 +796,7 @@ test_ssl_verify_signature_from_digest_ssa_ssacert(UNUSED const MunitParameter pa
 	return MUNIT_OK;
 }
 
-static MunitResult
+UNUSED static MunitResult
 test_ssl_verify_signature_from_digest_ssa_ssacert_sha512(UNUSED const MunitParameter params[],
 							 UNUSED void *data)
 {
@@ -1305,6 +1305,7 @@ test_ssl_aes_ctr_fail_key(UNUSED const MunitParameter params[], UNUSED void *dat
 }
 
 static MunitTest tests[] = {
+#ifndef ENFORCE_PSS_SIGNATURE
 	{ "test_ssl_verify_signature_from_buf_ssa_ssacert",
 	  test_ssl_verify_signature_from_buf_ssa_ssacert, setup, tear_down, MUNIT_TEST_OPTION_NONE,
 	  NULL },
@@ -1317,12 +1318,14 @@ static MunitTest tests[] = {
 	{ "test_ssl_verify_signature_from_buf_ssa_psscert_sha512",
 	  test_ssl_verify_signature_from_buf_ssa_psscert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 	{ "test_ssl_verify_signature_from_buf_pss_psscert",
 	  test_ssl_verify_signature_from_buf_pss_psscert, setup, tear_down, MUNIT_TEST_OPTION_NONE,
 	  NULL },
 	{ "test_ssl_verify_signature_from_buf_pss_psscert_sha512",
 	  test_ssl_verify_signature_from_buf_pss_psscert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#ifndef ENFORCE_PSS_SIGNATURE
 	{ "test_ssl_verify_signature_from_buf_pss_ssacert",
 	  test_ssl_verify_signature_from_buf_pss_ssacert, setup, tear_down, MUNIT_TEST_OPTION_NONE,
 	  NULL },
@@ -1333,6 +1336,7 @@ static MunitTest tests[] = {
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "test_ssl_verify_signature_ssa_sha512", test_ssl_verify_signature_ssa_sha512, setup,
 	  tear_down, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 	{ "test_ssl_verify_signature_pss", test_ssl_verify_signature_pss, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "test_ssl_verify_signature_pss_sha512", test_ssl_verify_signature_pss_sha512, setup,
@@ -1343,24 +1347,28 @@ static MunitTest tests[] = {
 	{ "ssl_verify_signature_from_digest sigpss_psscert_sha512",
 	  test_ssl_verify_signature_from_digest_pss_psscert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#ifndef ENFORCE_PSS_SIGNATURE
 	{ "ssl_verify_signature_from_digest sigpss_ssacert",
 	  test_ssl_verify_signature_from_digest_pss_ssacert, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "ssl_verify_signature_from_digest sigpss_ssacert_sha512",
 	  test_ssl_verify_signature_from_digest_pss_ssacert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 	{ "ssl_verify_signature_from_digest sigssa_psscert",
 	  test_ssl_verify_signature_from_digest_ssa_psscert, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "ssl_verify_signature_from_digest sigssa_psscert_sha512",
 	  test_ssl_verify_signature_from_digest_ssa_psscert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#ifndef ENFORCE_PSS_SIGNATURE
 	{ "ssl_verify_signature_from_digest sigssa_ssacert",
 	  test_ssl_verify_signature_from_digest_ssa_ssacert, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "ssl_verify_signature_from_digest sigssa_ssacert_sha512",
 	  test_ssl_verify_signature_from_digest_ssa_ssacert_sha512, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 	{ "ssl_create_csr_default", test_ssl_create_csr_openssl_default, setup, tear_down,
 	  MUNIT_TEST_OPTION_NONE, NULL },
 	{ "ssl_create_csr_pss", test_ssl_create_csr_pss, setup, tear_down, MUNIT_TEST_OPTION_NONE,

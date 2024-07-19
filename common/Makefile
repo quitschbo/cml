@@ -30,6 +30,7 @@ SANITIZERS ?= n
 WCAST_ALIGN ?= y
 WITH_OPENSSL ?= n
 WITH_PROTOBUF_TEXT ?= n
+ENFORCE_PSS_SIGNATURE ?= n
 
 LOCAL_CFLAGS += -I../include -pedantic -std=gnu99 -D _POSIX_C_SOURCE=200809L -D _XOPEN_SOURCE=700 -D _DEFAULT_SOURCE -O2
 LOCAL_CFLAGS += -Wall -Wextra -Wformat -Wformat-security -fstack-protector-all -fPIC
@@ -55,6 +56,9 @@ ifeq ($(SANITIZERS),y)
     # this requires libasan libasan-static libubsan libubsan-static
     # to be installed on the build host
     LOCAL_CFLAGS += -lasan -fsanitize=address -fsanitize=undefined -fsanitize-recover=address
+endif
+ifeq ($(ENFORCE_PSS_SIGNATURE), y)
+	LOCAL_CFLAGS += -DENFORCE_PSS_SIGNATURE
 endif
 
 .PHONY: all

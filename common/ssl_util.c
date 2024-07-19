@@ -1081,7 +1081,9 @@ ssl_verify_signature_from_digest(const char *cert_buf, size_t cert_len, const ui
 	}
 
 	int key_base_id = EVP_PKEY_base_id(key);
-
+#ifdef ENFORCE_PSS_SIGNATURE
+	key_base_id = EVP_PKEY_RSA_PSS;
+#endif
 	if (EVP_PKEY_RSA_PSS == key_base_id) {
 		DEBUG("Verifying signature with RSA-PSS padding scheme");
 		if (0 > (ret = ssl_set_pkey_ctx_rsa_pss(pkey_ctx, digest_fct))) {
