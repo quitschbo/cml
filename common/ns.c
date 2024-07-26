@@ -239,6 +239,11 @@ namespace_exec(pid_t namespace_pid, const int namespaces, int uid, int cap,
 			if (do_join_namespace("user", namespace_pid) == -1)
 				_exit(-1);
 		}
+		if (namespaces & CLONE_NEWTIME) {
+			TRACE("Join time namespace");
+			if (do_join_namespace("time_for_children", namespace_pid) == -1)
+				_exit(-1);
+		}
 		//after joining the mount namespace the container init process has pid 1 in procfs
 		if (namespaces & CLONE_NEWNS) {
 			TRACE("Join mnt namespace");
